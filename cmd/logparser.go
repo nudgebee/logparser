@@ -5,13 +5,14 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/coroot/logparser"
 	"io"
 	"os"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/nudgebee/logparser"
 )
 
 func main() {

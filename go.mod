@@ -1,4 +1,4 @@
-module github.com/coroot/logparser
+module github.com/nudgebee/logparser
 
 go 1.21
 
