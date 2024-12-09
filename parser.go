@@ -43,16 +43,19 @@ type Parser struct {
 	sensitivePatternsDefinations []SensitivePattern
 
 	sensitivePatterns map[sensitivePatternKey]*sensitivePatternStat
+
+	disableSensitiveDataDetection bool
 }
 
 type OnMsgCallbackF func(ts time.Time, level Level, patternHash string, msg string)
 
-func NewParser(ch <-chan LogEntry, decoder Decoder, onMsgCallback OnMsgCallbackF) *Parser {
+func NewParser(ch <-chan LogEntry, decoder Decoder, onMsgCallback OnMsgCallbackF, disableSensitiveDataDetection bool) *Parser {
 	p := &Parser{
-		decoder:           decoder,
-		patterns:          map[patternKey]*patternStat{},
-		onMsgCb:           onMsgCallback,
-		sensitivePatterns: map[sensitivePatternKey]*sensitivePatternStat{},
+		decoder:                       decoder,
+		patterns:                      map[patternKey]*patternStat{},
+		onMsgCb:                       onMsgCallback,
+		sensitivePatterns:             map[sensitivePatternKey]*sensitivePatternStat{},
+		disableSensitiveDataDetection: disableSensitiveDataDetection,
 	}
 	ctx, stop := context.WithCancel(context.Background())
 	p.stop = stop
@@ -135,6 +138,9 @@ func (p *Parser) inc(msg Message) {
 }
 
 func processSensitivePattern(msg Message, p *Parser, pattern *Pattern) {
+	if p.disableSensitiveDataDetection {
+		return
+	}
 	matchs := DetectSensitiveData(msg.Content, pattern.Hash(), p.sensitivePatternsDefinations)
 	for _, sKey := range matchs {
 		log.Printf("Sensitive data detected: %s", sKey.pattern)

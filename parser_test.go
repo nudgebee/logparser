@@ -9,7 +9,7 @@ import (
 
 func TestParser(t *testing.T) {
 	ch := make(chan LogEntry)
-	parser := NewParser(ch, nil, nil)
+	parser := NewParser(ch, nil, nil, true)
 	ch <- LogEntry{Timestamp: time.Now(), Content: "package.name [DEBUG] got 10 things in 3.1s", Level: LevelUnknown}
 
 	ch <- LogEntry{Timestamp: time.Now(), Content: "hello this is key AKIAUCTZOIG66SPQV67B", Level: LevelUnknown}
