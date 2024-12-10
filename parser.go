@@ -32,6 +32,11 @@ type SensitiveLogCounter struct {
 	Pattern  string
 }
 
+type PrecompiledPattern struct {
+	Name    string
+	Pattern *regexp.Regexp
+}
+
 type Parser struct {
 	decoder Decoder
 
@@ -43,7 +48,7 @@ type Parser struct {
 	stop func()
 
 	onMsgCb                      OnMsgCallbackF
-	sensitivePatternsDefinations []SensitivePattern
+	sensitivePatternsDefinations []PrecompiledPattern
 
 	sensitivePatterns map[sensitivePatternKey]*sensitivePatternStat
 
@@ -215,19 +220,11 @@ type SensitivePattern struct {
 	Pattern string `json:"pattern"`
 }
 
-func DetectSensitiveData(line string, hash string, patterns []SensitivePattern) []sensitivePatternKey {
+func DetectSensitiveData(line string, hash string, precompiledPatterns []PrecompiledPattern) []sensitivePatternKey {
 	matches := []sensitivePatternKey{}
-	for _, pattern := range patterns {
-		re, err := regexp.Compile(pattern.Pattern)
-		if err != nil {
-			log.Printf("Error compiling pattern '%s': %v", pattern.Name, err)
-			continue
-		}
-
-		if re.MatchString(line) {
-			// extract only the sensitive part of the line
-			sensitivePart := re.FindString(line)
-
+	for _, precompiled := range precompiledPatterns {
+		if precompiled.Pattern.MatchString(line) {
+			sensitivePart := precompiled.Pattern.FindString(line)
 			matches = append(matches, sensitivePatternKey{
 				pattern: sensitivePart,
 				hash:    hash,
@@ -237,11 +234,23 @@ func DetectSensitiveData(line string, hash string, patterns []SensitivePattern) 
 	return matches
 }
 
-func LoadPatterns() ([]SensitivePattern, error) {
+func LoadPatterns() ([]PrecompiledPattern, error) {
 	var patterns []SensitivePattern
 	err := json.Unmarshal(sensitivePatternsJSON, &patterns)
 	if err != nil {
 		return nil, err
 	}
-	return patterns, nil
+	precompiled := []PrecompiledPattern{}
+	for _, pattern := range patterns {
+		re, err := regexp.Compile(pattern.Pattern)
+		if err != nil {
+			log.Printf("Error compiling pattern '%s': %v", pattern.Name, err)
+			continue
+		}
+		precompiled = append(precompiled, PrecompiledPattern{
+			Name:    pattern.Name,
+			Pattern: re,
+		})
+	}
+	return precompiled, nil
 }
