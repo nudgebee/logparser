@@ -2,13 +2,16 @@ package logparser
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"log"
-	"os"
 	"regexp"
 	"sync"
 	"time"
 )
+
+//go:embed sensitive_patterns.json
+var sensitivePatternsJSON []byte
 
 type LogEntry struct {
 	Timestamp time.Time
@@ -57,7 +60,7 @@ func NewParser(ch <-chan LogEntry, decoder Decoder, onMsgCallback OnMsgCallbackF
 		sensitivePatterns:                map[sensitivePatternKey]*sensitivePatternStat{},
 		disableSensitivePatternDetection: disableSensitiveDataDetection,
 	}
-	patterns, err := LoadPatterns("sensitive_patterns.json")
+	patterns, err := LoadPatterns()
 	if err != nil {
 		log.Printf("Error loading sensitive patterns: %v", err)
 	}
@@ -236,17 +239,11 @@ func DetectSensitiveData(line string, hash string, patterns []SensitivePattern) 
 	return matches
 }
 
-func LoadPatterns(configFile string) ([]SensitivePattern, error) {
-	data, err := os.ReadFile(configFile)
-	if err != nil {
-		return nil, err
-	}
-
+func LoadPatterns() ([]SensitivePattern, error) {
 	var patterns []SensitivePattern
-	err = json.Unmarshal(data, &patterns)
+	err := json.Unmarshal(sensitivePatternsJSON, &patterns)
 	if err != nil {
 		return nil, err
 	}
-
 	return patterns, nil
 }
