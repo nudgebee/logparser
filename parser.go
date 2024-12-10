@@ -151,7 +151,6 @@ func processSensitivePattern(msg Message, p *Parser, pattern *Pattern) {
 	}
 	matchs := DetectSensitiveData(msg.Content, pattern.Hash(), p.sensitivePatternsDefinations)
 	for _, sKey := range matchs {
-		log.Printf("Sensitive data detected: %s", sKey.pattern)
 		stat := p.sensitivePatterns[sKey]
 		if stat == nil {
 			for k, ps := range p.sensitivePatterns {
