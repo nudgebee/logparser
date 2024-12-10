@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"os"
-	"path/filepath"
 	"regexp"
-	"runtime"
 	"sync"
 	"time"
 )
@@ -59,16 +57,15 @@ func NewParser(ch <-chan LogEntry, decoder Decoder, onMsgCallback OnMsgCallbackF
 		sensitivePatterns:                map[sensitivePatternKey]*sensitivePatternStat{},
 		disableSensitivePatternDetection: disableSensitiveDataDetection,
 	}
+	patterns, err := LoadPatterns("sensitive_patterns.json")
+	if err != nil {
+		log.Printf("Error loading sensitive patterns: %v", err)
+	}
+	p.sensitivePatternsDefinations = patterns
+	log.Printf("Loaded sensitive patterns %d", len(p.sensitivePatternsDefinations))
 	ctx, stop := context.WithCancel(context.Background())
 	p.stop = stop
 	p.multilineCollector = NewMultilineCollector(ctx, multilineCollectorTimeout, multilineCollectorLimit)
-	filePath := getConfigPath("sensitive_patterns.json")
-	definations, err := LoadPatterns(filePath)
-	if err != nil {
-		log.Printf("Error loading sensitive patterns: %v, filepath %s", err, filePath)
-	}
-	p.sensitivePatternsDefinations = definations
-	log.Printf("Loaded %d sensitive patterns, file path %s", len(p.sensitivePatternsDefinations), filePath)
 	go func() {
 		var err error
 		for {
@@ -98,12 +95,6 @@ func NewParser(ch <-chan LogEntry, decoder Decoder, onMsgCallback OnMsgCallbackF
 	}()
 
 	return p
-}
-
-func getConfigPath(file string) string {
-	_, b, _, _ := runtime.Caller(0)
-	basePath := filepath.Dir(b)
-	return filepath.Join(basePath, file)
 }
 
 func (p *Parser) Stop() {
@@ -223,21 +214,6 @@ type SensitivePattern struct {
 	Pattern string `json:"pattern"`
 }
 
-func LoadPatterns(configFile string) ([]SensitivePattern, error) {
-	data, err := os.ReadFile(configFile)
-	if err != nil {
-		return nil, err
-	}
-
-	var patterns []SensitivePattern
-	err = json.Unmarshal(data, &patterns)
-	if err != nil {
-		return nil, err
-	}
-
-	return patterns, nil
-}
-
 func DetectSensitiveData(line string, hash string, patterns []SensitivePattern) []sensitivePatternKey {
 	matches := []sensitivePatternKey{}
 	for _, pattern := range patterns {
@@ -258,4 +234,19 @@ func DetectSensitiveData(line string, hash string, patterns []SensitivePattern) 
 		}
 	}
 	return matches
+}
+
+func LoadPatterns(configFile string) ([]SensitivePattern, error) {
+	data, err := os.ReadFile(configFile)
+	if err != nil {
+		return nil, err
+	}
+
+	var patterns []SensitivePattern
+	err = json.Unmarshal(data, &patterns)
+	if err != nil {
+		return nil, err
+	}
+
+	return patterns, nil
 }
