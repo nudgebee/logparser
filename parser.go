@@ -138,6 +138,7 @@ func (p *Parser) inc(msg Message) {
 }
 
 func processSensitivePattern(msg Message, p *Parser, pattern *Pattern) {
+	log.Printf("Processing sensitive pattern: %s, flag %v", pattern.Hash(), p.disableSensitivePatternDetection)
 	if p.disableSensitivePatternDetection {
 		return
 	}
