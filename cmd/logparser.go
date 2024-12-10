@@ -23,7 +23,7 @@ func main() {
 
 	reader := bufio.NewReader(os.Stdin)
 	ch := make(chan logparser.LogEntry)
-	parser := logparser.NewParser(ch, nil, nil, true)
+	parser := logparser.NewParser(ch, nil, nil, false)
 	t := time.Now()
 	for {
 		line, err := reader.ReadString('\n')
@@ -39,10 +39,12 @@ func main() {
 	defer parser.Stop()
 
 	counters := parser.GetCounters()
+	sensitiveCounter := parser.GetSensitiveCounters()
 
 	order(counters)
 
 	output(counters, *screenWidth, *maxLinesPerMessage, d)
+	outputSensitive(sensitiveCounter, *screenWidth, *maxLinesPerMessage, d)
 }
 
 func order(counters []logparser.LogCounter) {
@@ -115,4 +117,53 @@ func colorize(level logparser.Level, format string, a ...interface{}) string {
 		c = "\033[32m" // green
 	}
 	return fmt.Sprintf(c+format+"\033[0m", a...)
+}
+
+func outputSensitive(counters []logparser.SensitiveLogCounter, screenWidth, maxLinesPerMessage int, duration time.Duration) {
+	grandTotal, total, max := 0, 0, 0
+	for _, c := range counters {
+		grandTotal += c.Messages
+		if c.Sample == "" {
+			continue
+		}
+		total += c.Messages
+		if c.Messages > max {
+			max = c.Messages
+		}
+	}
+	barWidth := 20
+	lineWidth := screenWidth - barWidth
+	messagesNumFmt := fmt.Sprintf("%%%dd", len(strconv.Itoa(max)))
+	for _, c := range counters {
+		if c.Sample == "" {
+			continue
+		}
+		w := c.Messages * barWidth / max
+		bar := strings.Repeat("▇", w+1) + strings.Repeat(" ", barWidth-w)
+		prefix := colorize(logparser.LevelCritical, "%s "+messagesNumFmt+" (%2d%%) ", bar, c.Messages, int(float64(c.Messages*100)/float64(total)))
+		sample := ""
+		for i, line := range strings.Split(c.Sample, "\n") {
+			if len(line) > lineWidth {
+				line = line[:lineWidth] + "..."
+			}
+			sample += line + "\n" + strings.Repeat(" ", len(prefix))
+			if i > maxLinesPerMessage {
+				sample += "...\n"
+				break
+			}
+		}
+		sample = strings.TrimRight(sample, "\n ")
+		fmt.Printf("%s%s\n", prefix, sample)
+	}
+
+	byLevel := map[string]int{}
+	for _, c := range counters {
+		byLevel[c.Pattern] += c.Messages
+	}
+	fmt.Println()
+	fmt.Printf("%d messages processed in %.3f seconds:\n", grandTotal, duration.Seconds())
+	for l, c := range byLevel {
+		fmt.Printf("  %s: %d\n", l, c)
+	}
+	fmt.Println()
 }

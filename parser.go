@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"log"
 	"os"
+	"path/filepath"
 	"regexp"
+	"runtime"
 	"sync"
 	"time"
 )
@@ -60,7 +62,7 @@ func NewParser(ch <-chan LogEntry, decoder Decoder, onMsgCallback OnMsgCallbackF
 	ctx, stop := context.WithCancel(context.Background())
 	p.stop = stop
 	p.multilineCollector = NewMultilineCollector(ctx, multilineCollectorTimeout, multilineCollectorLimit)
-	p.sensitivePatternsDefinations, _ = LoadPatterns("sensitive_patterns.json")
+	p.sensitivePatternsDefinations, _ = LoadPatterns(getConfigPath("sensitive_patterns.json"))
 	log.Printf("Loaded %d sensitive patterns", len(p.sensitivePatternsDefinations))
 	go func() {
 		var err error
@@ -91,6 +93,12 @@ func NewParser(ch <-chan LogEntry, decoder Decoder, onMsgCallback OnMsgCallbackF
 	}()
 
 	return p
+}
+
+func getConfigPath(file string) string {
+	_, b, _, _ := runtime.Caller(0)
+	basePath := filepath.Dir(b)
+	return filepath.Join(basePath, file)
 }
 
 func (p *Parser) Stop() {
