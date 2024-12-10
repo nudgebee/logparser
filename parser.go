@@ -65,7 +65,6 @@ func NewParser(ch <-chan LogEntry, decoder Decoder, onMsgCallback OnMsgCallbackF
 		log.Printf("Error loading sensitive patterns: %v", err)
 	}
 	p.sensitivePatternsDefinations = patterns
-	log.Printf("Loaded sensitive patterns %d", len(p.sensitivePatternsDefinations))
 	ctx, stop := context.WithCancel(context.Background())
 	p.stop = stop
 	p.multilineCollector = NewMultilineCollector(ctx, multilineCollectorTimeout, multilineCollectorLimit)
