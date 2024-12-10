@@ -62,8 +62,13 @@ func NewParser(ch <-chan LogEntry, decoder Decoder, onMsgCallback OnMsgCallbackF
 	ctx, stop := context.WithCancel(context.Background())
 	p.stop = stop
 	p.multilineCollector = NewMultilineCollector(ctx, multilineCollectorTimeout, multilineCollectorLimit)
-	p.sensitivePatternsDefinations, _ = LoadPatterns(getConfigPath("sensitive_patterns.json"))
-	log.Printf("Loaded %d sensitive patterns", len(p.sensitivePatternsDefinations))
+	filePath := getConfigPath("sensitive_patterns.json")
+	definations, err := LoadPatterns(filePath)
+	if err != nil {
+		log.Printf("Error loading sensitive patterns: %v, filepath %s", err, filePath)
+	}
+	p.sensitivePatternsDefinations = definations
+	log.Printf("Loaded %d sensitive patterns, file path %s", len(p.sensitivePatternsDefinations), filePath)
 	go func() {
 		var err error
 		for {
