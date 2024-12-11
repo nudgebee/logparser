@@ -30,6 +30,8 @@ type SensitiveLogCounter struct {
 	Sample   string
 	Messages int
 	Pattern  string
+	Regex    string
+	Name     string
 }
 
 type PrecompiledPattern struct {
@@ -154,7 +156,8 @@ func processSensitivePattern(msg Message, p *Parser, pattern *Pattern) {
 		return
 	}
 	matchs := DetectSensitiveData(msg.Content, pattern.Hash(), p.sensitivePatternsDefinations)
-	for _, sKey := range matchs {
+	for _, match := range matchs {
+		sKey := match.sensitivePatternKey
 		stat := p.sensitivePatterns[sKey]
 		if stat == nil {
 			for k, ps := range p.sensitivePatterns {
@@ -164,7 +167,7 @@ func processSensitivePattern(msg Message, p *Parser, pattern *Pattern) {
 				}
 			}
 			if stat == nil {
-				stat = &sensitivePatternStat{pattern: pattern, sample: msg.Content, sensitiveKey: sKey.pattern}
+				stat = &sensitivePatternStat{pattern: pattern, sample: msg.Content, sensitiveKey: sKey.pattern, regex: match.regex, name: match.name}
 				p.sensitivePatterns[sKey] = stat
 			}
 		}
@@ -187,7 +190,7 @@ func (p *Parser) GetSensitiveCounters() []SensitiveLogCounter {
 	defer p.lock.RUnlock()
 	res := make([]SensitiveLogCounter, 0, len(p.sensitivePatterns))
 	for k, ps := range p.sensitivePatterns {
-		res = append(res, SensitiveLogCounter{Pattern: k.pattern, Messages: ps.messages, Sample: ps.sample})
+		res = append(res, SensitiveLogCounter{Pattern: k.pattern, Messages: ps.messages, Sample: ps.sample, Regex: ps.regex, Name: ps.name})
 	}
 	return res
 }
@@ -208,6 +211,8 @@ type sensitivePatternStat struct {
 	sample       string
 	messages     int
 	sensitiveKey string
+	regex        string
+	name         string
 }
 
 type sensitivePatternKey struct {
@@ -220,15 +225,22 @@ type SensitivePattern struct {
 	Pattern string `json:"pattern"`
 }
 
-func DetectSensitiveData(line string, hash string, precompiledPatterns []PrecompiledPattern) []sensitivePatternKey {
-	matches := []sensitivePatternKey{}
+type SensitivePatternMatch struct {
+	sensitivePatternKey sensitivePatternKey
+	regex               string
+	name                string
+}
+
+func DetectSensitiveData(line string, hash string, precompiledPatterns []PrecompiledPattern) []SensitivePatternMatch {
+	matches := []SensitivePatternMatch{}
 	for _, precompiled := range precompiledPatterns {
 		if precompiled.Pattern.MatchString(line) {
 			sensitivePart := precompiled.Pattern.FindString(line)
-			matches = append(matches, sensitivePatternKey{
+			key := sensitivePatternKey{
 				pattern: sensitivePart,
 				hash:    hash,
-			})
+			}
+			matches = append(matches, SensitivePatternMatch{name: precompiled.Name, sensitivePatternKey: key, regex: precompiled.Pattern.String()})
 		}
 	}
 	return matches

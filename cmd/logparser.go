@@ -153,7 +153,7 @@ func outputSensitive(counters []logparser.SensitiveLogCounter, screenWidth, maxL
 			}
 		}
 		sample = strings.TrimRight(sample, "\n ")
-		fmt.Printf("%s%s\n", prefix, sample)
+		fmt.Printf("%s%s%s%s\n", prefix, sample, c.Name, c.Regex)
 	}
 
 	byLevel := map[string]int{}
