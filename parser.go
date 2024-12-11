@@ -241,6 +241,7 @@ func DetectSensitiveData(line string, hash string, precompiledPatterns []Precomp
 				hash:    hash,
 			}
 			matches = append(matches, SensitivePatternMatch{name: precompiled.Name, sensitivePatternKey: key, regex: precompiled.Pattern.String()})
+			break
 		}
 	}
 	return matches
