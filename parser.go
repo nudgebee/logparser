@@ -32,6 +32,7 @@ type SensitiveLogCounter struct {
 	Pattern  string
 	Regex    string
 	Name     string
+	Hash     string
 }
 
 type PrecompiledPattern struct {
@@ -167,7 +168,7 @@ func processSensitivePattern(msg Message, p *Parser, pattern *Pattern) {
 				}
 			}
 			if stat == nil {
-				stat = &sensitivePatternStat{pattern: pattern, sample: msg.Content, sensitiveKey: sKey.pattern, regex: match.regex, name: match.name}
+				stat = &sensitivePatternStat{pattern: pattern, sample: msg.Content, sensitiveKey: sKey.pattern, regex: match.regex, name: match.name, hash: sKey.hash}
 				p.sensitivePatterns[sKey] = stat
 			}
 		}
@@ -190,7 +191,7 @@ func (p *Parser) GetSensitiveCounters() []SensitiveLogCounter {
 	defer p.lock.RUnlock()
 	res := make([]SensitiveLogCounter, 0, len(p.sensitivePatterns))
 	for k, ps := range p.sensitivePatterns {
-		res = append(res, SensitiveLogCounter{Pattern: k.pattern, Messages: ps.messages, Sample: ps.sample, Regex: ps.regex, Name: ps.name})
+		res = append(res, SensitiveLogCounter{Pattern: k.pattern, Messages: ps.messages, Sample: ps.sample, Regex: ps.regex, Name: ps.name, Hash: ps.hash})
 	}
 	return res
 }
@@ -213,6 +214,7 @@ type sensitivePatternStat struct {
 	sensitiveKey string
 	regex        string
 	name         string
+	hash         string
 }
 
 type sensitivePatternKey struct {
@@ -229,6 +231,7 @@ type SensitivePatternMatch struct {
 	sensitivePatternKey sensitivePatternKey
 	regex               string
 	name                string
+	hash                string
 }
 
 func DetectSensitiveData(line string, hash string, precompiledPatterns []PrecompiledPattern) []SensitivePatternMatch {
@@ -240,7 +243,7 @@ func DetectSensitiveData(line string, hash string, precompiledPatterns []Precomp
 				pattern: sensitivePart,
 				hash:    hash,
 			}
-			matches = append(matches, SensitivePatternMatch{name: precompiled.Name, sensitivePatternKey: key, regex: precompiled.Pattern.String()})
+			matches = append(matches, SensitivePatternMatch{name: precompiled.Name, sensitivePatternKey: key, regex: precompiled.Pattern.String(), hash: hash})
 			break
 		}
 	}
