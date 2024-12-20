@@ -60,7 +60,7 @@ type Parser struct {
 
 type OnMsgCallbackF func(ts time.Time, level Level, patternHash string, msg string)
 
-func NewParser(ch <-chan LogEntry, decoder Decoder, onMsgCallback OnMsgCallbackF, disableSensitiveDataDetection bool) *Parser {
+func NewParser(ch <-chan LogEntry, decoder Decoder, onMsgCallback OnMsgCallbackF, multilineCollectorTimeout time.Duration, disableSensitiveDataDetection bool) *Parser {
 	p := &Parser{
 		decoder:                          decoder,
 		patterns:                         map[patternKey]*patternStat{},
