@@ -3,6 +3,7 @@ package logparser
 import (
 	"bytes"
 	"crypto/md5"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -89,9 +90,14 @@ func (p *Pattern) WeakEqual(other *Pattern) bool {
 func NewPattern(input string) *Pattern {
 	pattern := &Pattern{}
 	buf := buffers.Get().(*bytes.Buffer)
+
+	if strings.HasPrefix(strings.TrimSpace(input), "{") {
+		input = normalizeJSONLog(input)
+	}
 	buf.Reset()
 	for _, p := range strings.Fields(removeQuotedAndBrackets(input, buf)) {
 		p = strings.TrimRight(p, "=:],;")
+
 		if len(p) < patterMinWordLen {
 			continue
 		}
@@ -107,6 +113,7 @@ func NewPattern(input string) *Pattern {
 			break
 		}
 	}
+
 	buffers.Put(buf)
 	return pattern
 }
@@ -200,6 +207,20 @@ func removeQuotedAndBrackets(s string, buf *bytes.Buffer) string {
 			continue
 		}
 		buf.WriteRune(r)
+	}
+	return buf.String()
+}
+
+func normalizeJSONLog(line string) string {
+	var m map[string]interface{}
+	if err := json.Unmarshal([]byte(line), &m); err != nil {
+		// not a JSON log, return raw
+		return line
+	}
+	var buf strings.Builder
+	for _, v := range m {
+		strVal := fmt.Sprintf("%v", v)
+		buf.WriteString(fmt.Sprintf("%s ", strVal))
 	}
 	return buf.String()
 }

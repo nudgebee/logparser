@@ -114,3 +114,14 @@ func TestPatternRemoveQuotedAndBrackets(t *testing.T) {
 		"Jun 16 21:41:24 host01 kubelet: W0616 21:41:24.642736     961 reflector.go:341]",
 		removeQuotedAndBrackets(`Jun 16 21:41:24 host01 kubelet[961]: W0616 21:41:24.642736     961 reflector.go:341]`, buf))
 }
+
+func TestJsonPattern(t *testing.T) {
+	p1 := NewPattern("{\"foo\": \"bar\"}")
+	p2 := NewPattern("{\"foo\": \"bar 11818181\"}")
+	assert.Equal(t, p1.String(), p2.String())
+	assert.Equal(t, p1.Hash(), p2.Hash())
+
+	p3 := NewPattern("{\"asctime\": \"2025-04-03 08:10:06,482\", \"levelname\": \"ERROR\", \"filename\": \"database.py\", \"lineno\": 61, \"message\": \"Error selecting data from cloud_accounts table: connection to server at \\\"192.168.1.13\\\", port 5432 failed: FATAL: remaining connection slots are reserved for roles with the SUPERUSER attribute\\n\", \"exc_info\": \"Traceback (most recent call last):\\n File \\\"/app/db/database.py\\\", line 40, in select_data\\n conn = create_db_connection_pool().getconn()\\n ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\\n File \\\"/usr/local/lib/python3.12/site-packages/psycopg2/pool.py\\\", line 93, in _getconn\\n return self._connect(key)\\n ^^^^^^^^^^^^^^^^^^\\n File \\\"/usr/local/lib/python3.12/site-packages/psycopg2/pool.py\\\", line 63, in _connect\\n conn = psycopg2.connect(*self._args, **self._kwargs)\\n ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\\n File \\\"/usr/local/lib/python3.12/site-packages/psycopg2/__init__.py\\\", line 122, in connect\\n conn = _connect(dsn, connection_factory=connection_factory, **kwasync)\\n ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\\npsycopg2.OperationalError: connection to server at \\\"192.168.1.13\\\", port 5432 failed: FATAL: remaining connection slots are reserved for roles with the SUPERUSER attribute\\n\", \"taskName\": null}")
+
+	assert.NotEqual(t, "d4c3b7e0f4a1d2c5e8f9a4b5d6e7f8a9", p3.Hash())
+}
