@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -217,10 +218,17 @@ func normalizeJSONLog(line string) string {
 		// not a JSON log, return raw
 		return line
 	}
+
+	var keys []string
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys) // sort keys alphabetically
+
 	var buf strings.Builder
-	for _, v := range m {
-		strVal := fmt.Sprintf("%v", v)
+	for _, k := range keys {
+		strVal := fmt.Sprintf("%v", m[k])
 		buf.WriteString(fmt.Sprintf("%s ", strVal))
 	}
-	return buf.String()
+	return strings.TrimSpace(buf.String()) // trim trailing space
 }
