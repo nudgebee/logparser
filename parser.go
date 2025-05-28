@@ -60,7 +60,7 @@ type Parser struct {
 
 type OnMsgCallbackF func(ts time.Time, level Level, patternHash string, msg string)
 
-func NewParser(ch <-chan LogEntry, decoder Decoder, onMsgCallback OnMsgCallbackF, multilineCollectorTimeout time.Duration, disableSensitiveDataDetection bool) *Parser {
+func NewParser(ch <-chan LogEntry, decoder Decoder, onMsgCallback OnMsgCallbackF, multilineCollectorTimeout time.Duration, disableSensitiveDataDetection bool, patternsCompiled []PrecompiledPattern) *Parser {
 	p := &Parser{
 		decoder:                          decoder,
 		patterns:                         map[patternKey]*patternStat{},
@@ -68,11 +68,16 @@ func NewParser(ch <-chan LogEntry, decoder Decoder, onMsgCallback OnMsgCallbackF
 		sensitivePatterns:                map[sensitivePatternKey]*sensitivePatternStat{},
 		disableSensitivePatternDetection: disableSensitiveDataDetection,
 	}
-	patterns, err := LoadPatterns()
-	if err != nil {
-		log.Printf("Error loading sensitive patterns: %v", err)
+
+	if len(patternsCompiled) > 0 {
+		p.sensitivePatternsDefinations = patternsCompiled
+	} else {
+		patterns, err := LoadPatterns()
+		if err != nil {
+			log.Printf("Error loading sensitive patterns: %v", err)
+		}
+		p.sensitivePatternsDefinations = patterns
 	}
-	p.sensitivePatternsDefinations = patterns
 	ctx, stop := context.WithCancel(context.Background())
 	p.stop = stop
 	p.multilineCollector = NewMultilineCollector(ctx, multilineCollectorTimeout, multilineCollectorLimit)
