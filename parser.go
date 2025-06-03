@@ -6,12 +6,18 @@ import (
 	"encoding/json"
 	"log"
 	"regexp"
+	"strings" // Added for strings.Contains
 	"sync"
 	"time"
 )
 
 //go:embed sensitive_patterns.json
 var sensitivePatternsJSON []byte
+
+var (
+	globalSensitivePatterns []PrecompiledPattern
+	loadPatternsOnce        sync.Once
+)
 
 type LogEntry struct {
 	Timestamp time.Time
@@ -36,8 +42,9 @@ type SensitiveLogCounter struct {
 }
 
 type PrecompiledPattern struct {
-	Name    string
-	Pattern *regexp.Regexp
+	Name     string
+	Pattern  *regexp.Regexp
+	Keywords []string
 }
 
 type Parser struct {
@@ -60,6 +67,20 @@ type Parser struct {
 
 type OnMsgCallbackF func(ts time.Time, level Level, patternHash string, msg string)
 
+func getSensitivePatterns() []PrecompiledPattern {
+	loadPatternsOnce.Do(func() {
+		patterns, err := LoadPatterns()
+		if err != nil {
+			log.Printf("Error loading sensitive patterns: %v", err)
+			// In case of error, globalSensitivePatterns will remain nil or empty.
+			// Depending on desired behavior, you might want to panic or handle differently.
+			return
+		}
+		globalSensitivePatterns = patterns
+	})
+	return globalSensitivePatterns
+}
+
 func NewParser(ch <-chan LogEntry, decoder Decoder, onMsgCallback OnMsgCallbackF, multilineCollectorTimeout time.Duration, disableSensitiveDataDetection bool) *Parser {
 	p := &Parser{
 		decoder:                          decoder,
@@ -68,11 +89,7 @@ func NewParser(ch <-chan LogEntry, decoder Decoder, onMsgCallback OnMsgCallbackF
 		sensitivePatterns:                map[sensitivePatternKey]*sensitivePatternStat{},
 		disableSensitivePatternDetection: disableSensitiveDataDetection,
 	}
-	patterns, err := LoadPatterns()
-	if err != nil {
-		log.Printf("Error loading sensitive patterns: %v", err)
-	}
-	p.sensitivePatternsDefinations = patterns
+	p.sensitivePatternsDefinations = getSensitivePatterns()
 	ctx, stop := context.WithCancel(context.Background())
 	p.stop = stop
 	p.multilineCollector = NewMultilineCollector(ctx, multilineCollectorTimeout, multilineCollectorLimit)
@@ -223,8 +240,9 @@ type sensitivePatternKey struct {
 }
 
 type SensitivePattern struct {
-	Name    string `json:"name"`
-	Pattern string `json:"pattern"`
+	Name     string   `json:"name"`
+	Pattern  string   `json:"pattern"`
+	Keywords []string `json:"keywords"`
 }
 
 type SensitivePatternMatch struct {
@@ -237,6 +255,20 @@ type SensitivePatternMatch struct {
 func DetectSensitiveData(line string, hash string, precompiledPatterns []PrecompiledPattern) []SensitivePatternMatch {
 	matches := []SensitivePatternMatch{}
 	for _, precompiled := range precompiledPatterns {
+		// Keyword pre-filtering
+		if len(precompiled.Keywords) > 0 {
+			foundKeyword := false
+			for _, keyword := range precompiled.Keywords {
+				if strings.Contains(line, keyword) {
+					foundKeyword = true
+					break
+				}
+			}
+			if !foundKeyword {
+				continue // Skip MatchString if no keywords were found
+			}
+		}
+
 		if precompiled.Pattern.MatchString(line) {
 			sensitivePart := precompiled.Pattern.FindString(line)
 			key := sensitivePatternKey{
@@ -264,8 +296,9 @@ func LoadPatterns() ([]PrecompiledPattern, error) {
 			continue
 		}
 		precompiled = append(precompiled, PrecompiledPattern{
-			Name:    pattern.Name,
-			Pattern: re,
+			Name:     pattern.Name,
+			Pattern:  re,
+			Keywords: pattern.Keywords, // Copy keywords
 		})
 	}
 	return precompiled, nil
