@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"fmt" // Added for fmt.Errorf
 	"log"
 	"regexp"
 	"strings" // Added for strings.Contains
@@ -16,6 +17,7 @@ var sensitivePatternsJSON []byte
 
 var (
 	globalSensitivePatterns []PrecompiledPattern
+	loadPatternsError       error
 	loadPatternsOnce        sync.Once
 )
 
@@ -67,29 +69,40 @@ type Parser struct {
 
 type OnMsgCallbackF func(ts time.Time, level Level, patternHash string, msg string)
 
-func getSensitivePatterns() []PrecompiledPattern {
+func getSensitivePatterns() ([]PrecompiledPattern, error) {
 	loadPatternsOnce.Do(func() {
 		patterns, err := LoadPatterns()
+		// Store both patterns and error in global variables.
+		globalSensitivePatterns = patterns
+		loadPatternsError = err
+
 		if err != nil {
 			log.Printf("Error loading sensitive patterns: %v", err)
-			// In case of error, globalSensitivePatterns will remain nil or empty.
-			// Depending on desired behavior, you might want to panic or handle differently.
-			return
+			// No return here; the error is stored and will be returned by the outer function.
 		}
-		globalSensitivePatterns = patterns
 	})
-	return globalSensitivePatterns
+	return globalSensitivePatterns, loadPatternsError
 }
 
-func NewParser(ch <-chan LogEntry, decoder Decoder, onMsgCallback OnMsgCallbackF, multilineCollectorTimeout time.Duration, disableSensitiveDataDetection bool) *Parser {
+func NewParser(ch <-chan LogEntry, decoder Decoder, onMsgCallback OnMsgCallbackF, multilineCollectorTimeout time.Duration, disableSensitiveDataDetection bool) (*Parser, error) {
+	patterns, err := getSensitivePatterns()
+	if err != nil {
+		if !disableSensitiveDataDetection {
+			return nil, fmt.Errorf("failed to load sensitive patterns: %w", err)
+		}
+		// If disableSensitiveDataDetection is true, the error was already logged by getSensitivePatterns.
+		// We can proceed with patterns being nil or empty.
+	}
+
 	p := &Parser{
 		decoder:                          decoder,
 		patterns:                         map[patternKey]*patternStat{},
 		onMsgCb:                          onMsgCallback,
 		sensitivePatterns:                map[sensitivePatternKey]*sensitivePatternStat{},
 		disableSensitivePatternDetection: disableSensitiveDataDetection,
+		sensitivePatternsDefinations:     patterns, // Assign loaded patterns
 	}
-	p.sensitivePatternsDefinations = getSensitivePatterns()
+
 	ctx, stop := context.WithCancel(context.Background())
 	p.stop = stop
 	p.multilineCollector = NewMultilineCollector(ctx, multilineCollectorTimeout, multilineCollectorLimit)
@@ -121,7 +134,7 @@ func NewParser(ch <-chan LogEntry, decoder Decoder, onMsgCallback OnMsgCallbackF
 		}
 	}()
 
-	return p
+	return p, nil
 }
 
 func (p *Parser) Stop() {
@@ -292,8 +305,8 @@ func LoadPatterns() ([]PrecompiledPattern, error) {
 	for _, pattern := range patterns {
 		re, err := regexp.Compile(pattern.Pattern)
 		if err != nil {
-			log.Printf("Error compiling pattern '%s': %v", pattern.Name, err)
-			continue
+			// log.Printf("Error compiling pattern '%s': %v", pattern.Name, err) // Optional: remove logging or keep if desired alongside error propagation
+			return nil, err // Return error immediately
 		}
 		precompiled = append(precompiled, PrecompiledPattern{
 			Name:     pattern.Name,

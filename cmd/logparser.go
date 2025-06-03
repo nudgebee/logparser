@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log" // Added for log.Fatalf
 	"os"
 	"sort"
 	"strconv"
@@ -23,7 +24,10 @@ func main() {
 
 	reader := bufio.NewReader(os.Stdin)
 	ch := make(chan logparser.LogEntry)
-	parser := logparser.NewParser(ch, nil, nil, time.Second, false)
+	parser, err := logparser.NewParser(ch, nil, nil, time.Second, false)
+	if err != nil {
+		log.Fatalf("Error initializing log parser: %v", err)
+	}
 	t := time.Now()
 	for {
 		line, err := reader.ReadString('\n')
