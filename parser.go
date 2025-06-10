@@ -68,11 +68,15 @@ func NewParser(ch <-chan LogEntry, decoder Decoder, onMsgCallback OnMsgCallbackF
 		sensitivePatterns:                map[sensitivePatternKey]*sensitivePatternStat{},
 		disableSensitivePatternDetection: disableSensitiveDataDetection,
 	}
-	patterns, err := LoadPatterns()
-	if err != nil {
-		log.Printf("Error loading sensitive patterns: %v", err)
+	if !disableSensitiveDataDetection {
+		patterns, err := LoadPatterns()
+		if err != nil {
+			log.Printf("Error loading sensitive patterns: %v", err)
+		}
+		p.sensitivePatternsDefinations = patterns
+	} else {
+		p.sensitivePatternsDefinations = []PrecompiledPattern{}
 	}
-	p.sensitivePatternsDefinations = patterns
 	ctx, stop := context.WithCancel(context.Background())
 	p.stop = stop
 	p.multilineCollector = NewMultilineCollector(ctx, multilineCollectorTimeout, multilineCollectorLimit)
