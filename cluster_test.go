@@ -143,3 +143,83 @@ func TestExtractPatterns_WithNumbersAndCodes(t *testing.T) {
 		assert.Contains(t, patterns[0].Template, "*", "Template should contain wildcards for numbers")
 	}
 }
+
+// TestPatternExtractor_Streaming tests the streaming API for memory-efficient processing
+func TestPatternExtractor_Streaming(t *testing.T) {
+	extractor, err := NewPatternExtractor()
+	assert.Nil(t, err, "NewPatternExtractor should not return error")
+	assert.NotNil(t, extractor, "Extractor should not be nil")
+
+	// Simulate streaming logs one at a time
+	logs := []string{
+		"Failed to get latest location by identifier: USJOT | p44.exception.RemoteServiceException",
+		"Failed to get latest location by identifier: USCVG | p44.exception.RemoteServiceException",
+		"Failed to get latest location by identifier: USSLC | p44.exception.RemoteServiceException",
+		"DetectEtaChanges failed | java.lang.NullPointerException",
+		"DetectEtaChanges failed | java.lang.NullPointerException",
+	}
+
+	for _, log := range logs {
+		err := extractor.AddLog(log)
+		assert.Nil(t, err, "AddLog should not return error")
+	}
+
+	assert.Equal(t, 5, extractor.TotalLogs(), "Should have processed 5 logs")
+
+	patterns := extractor.GetPatterns(10)
+	assert.Equal(t, 2, len(patterns), "Should find 2 patterns")
+
+	// Most frequent pattern should be NullPointerException
+	assert.Equal(t, 3, patterns[0].Count, "First pattern should have 3 occurrences")
+	assert.Contains(t, patterns[0].Template, "RemoteServiceException", "First pattern should be RemoteServiceException")
+
+	// Second pattern
+	assert.Equal(t, 2, patterns[1].Count, "Second pattern should have 2 occurrences")
+	assert.Contains(t, patterns[1].Template, "NullPointerException", "Second pattern should be NullPointerException")
+}
+
+// TestPatternExtractor_EmptyLinesSkipped tests that empty lines are skipped but counted
+func TestPatternExtractor_EmptyLinesSkipped(t *testing.T) {
+	extractor, err := NewPatternExtractor()
+	assert.Nil(t, err)
+
+	logs := []string{
+		"Database connection failed",
+		"",
+		"   ",
+		"NullPointerException occurred",
+		"\t\n",
+	}
+
+	for _, log := range logs {
+		_ = extractor.AddLog(log)
+	}
+
+	// Empty lines are skipped in AddLog (return early)
+	assert.Equal(t, 2, extractor.TotalLogs(), "Should count only non-empty logs")
+
+	patterns := extractor.GetPatterns(10)
+	assert.Equal(t, 2, len(patterns), "Should find 2 patterns for 2 distinct logs")
+}
+
+// TestPatternExtractor_MaxPatternsLimit tests that maxPatterns is respected
+func TestPatternExtractor_MaxPatternsLimit(t *testing.T) {
+	extractor, err := NewPatternExtractor()
+	assert.Nil(t, err)
+
+	// Add 5 distinct error types
+	logs := []string{
+		"Error type A occurred",
+		"Error type B occurred",
+		"Error type C occurred",
+		"Error type D occurred",
+		"Error type E occurred",
+	}
+
+	for _, log := range logs {
+		_ = extractor.AddLog(log)
+	}
+
+	patterns := extractor.GetPatterns(3)
+	assert.LessOrEqual(t, len(patterns), 3, "Should respect maxPatterns limit")
+}
