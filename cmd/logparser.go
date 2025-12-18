@@ -55,8 +55,13 @@ func main() {
 }
 
 func runClusterMode(screenWidth, maxPatterns int) {
-	// Read all logs from stdin
-	var logs []string
+	// Create streaming pattern extractor (memory-efficient)
+	extractor, err := logparser.NewPatternExtractor()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error initializing pattern extractor: %v\n", err)
+		os.Exit(1)
+	}
+
 	scanner := bufio.NewScanner(os.Stdin)
 
 	// Increase buffer size for long log lines
@@ -64,10 +69,14 @@ func runClusterMode(screenWidth, maxPatterns int) {
 	scanner.Buffer(buf, 1024*1024) // 1MB max line size
 
 	startTime := time.Now()
+	lineCount := 0
+
+	// Stream logs one at a time (memory-efficient)
 	for scanner.Scan() {
 		line := scanner.Text()
-		if strings.TrimSpace(line) != "" {
-			logs = append(logs, line)
+		lineCount++
+		if err := extractor.AddLog(line); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to process line %d: %v\n", lineCount, err)
 		}
 	}
 
@@ -76,18 +85,18 @@ func runClusterMode(screenWidth, maxPatterns int) {
 		os.Exit(1)
 	}
 
-	if len(logs) == 0 {
+	if lineCount == 0 {
 		fmt.Println("No logs to process")
 		return
 	}
 
-	// Extract patterns using Drain3
-	patterns := logparser.ExtractPatterns(logs, maxPatterns)
+	// Extract patterns from processed logs
+	patterns := extractor.GetPatterns(maxPatterns)
 	duration := time.Since(startTime)
 
 	// Display results
 	fmt.Printf("\n=== LOG PATTERNS (Drain3 Clustering) ===\n\n")
-	fmt.Printf("Processed %d log lines in %.3f seconds\n", len(logs), duration.Seconds())
+	fmt.Printf("Processed %d log lines in %.3f seconds\n", lineCount, duration.Seconds())
 	fmt.Printf("Found %d unique patterns\n\n", len(patterns))
 
 	if len(patterns) == 0 {

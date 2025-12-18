@@ -127,6 +127,113 @@ func ExtractPatterns(logs []string, maxPatterns int) []LogPattern {
 	return patterns
 }
 
+// PatternExtractor provides streaming log pattern extraction using Drain3 algorithm.
+// Use this for memory-efficient processing of large log files.
+type PatternExtractor struct {
+	drain           *goDrain.Drain
+	clusterExamples map[int64]string
+	totalCount      int
+}
+
+// NewPatternExtractor creates a new streaming pattern extractor.
+// It processes logs one at a time without buffering them all in memory.
+func NewPatternExtractor() (*PatternExtractor, error) {
+	drain, err := goDrain.NewDrain(
+		goDrain.WithDepth(4),         // Parse tree depth - balanced for structured logs
+		goDrain.WithSimTh(0.5),       // 50% similarity threshold - groups similar errors
+		goDrain.WithMaxChildren(50),  // Max children per tree node - performance optimized
+		goDrain.WithMaxCluster(1000), // Max number of clusters - handle diverse logs
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return &PatternExtractor{
+		drain:           drain,
+		clusterExamples: make(map[int64]string),
+		totalCount:      0,
+	}, nil
+}
+
+// AddLog processes a single log line. Call this for each log line in streaming fashion.
+// This method is memory-efficient as it doesn't store the log after processing.
+func (pe *PatternExtractor) AddLog(log string) error {
+	if strings.TrimSpace(log) == "" {
+		return nil
+	}
+
+	pe.totalCount++
+
+	// Add to drain3 for pattern extraction
+	cluster, _, err := pe.drain.AddLogMessage(log)
+	if err != nil {
+		return err
+	}
+
+	// Store first example for this cluster if we don't have one yet
+	if cluster != nil {
+		if _, exists := pe.clusterExamples[cluster.ClusterId]; !exists {
+			pe.clusterExamples[cluster.ClusterId] = log
+		}
+	}
+
+	return nil
+}
+
+// GetPatterns returns the extracted patterns sorted by frequency.
+// Call this after processing all logs with AddLog.
+func (pe *PatternExtractor) GetPatterns(maxPatterns int) []LogPattern {
+	clusters := pe.drain.GetClusters()
+	if len(clusters) == 0 {
+		return []LogPattern{}
+	}
+
+	patterns := make([]LogPattern, 0, len(clusters))
+	totalClusterCount := 0
+
+	for _, cluster := range clusters {
+		template := formatDrainTemplate(cluster)
+		if template != "" {
+			example := pe.clusterExamples[cluster.ClusterId]
+
+			patterns = append(patterns, LogPattern{
+				Template:   template,
+				Count:      int(cluster.Size),
+				Percentage: 0, // Will calculate after getting total
+				Example:    example,
+			})
+			totalClusterCount += int(cluster.Size)
+		}
+	}
+
+	// Calculate percentages
+	if totalClusterCount > 0 {
+		for i := range patterns {
+			patterns[i].Percentage = float64(patterns[i].Count) * 100.0 / float64(totalClusterCount)
+		}
+	}
+
+	// Sort by count (descending), then by template alphabetically
+	sort.Slice(patterns, func(i, j int) bool {
+		if patterns[i].Count == patterns[j].Count {
+			return patterns[i].Template < patterns[j].Template
+		}
+		return patterns[i].Count > patterns[j].Count
+	})
+
+	// Limit results if requested
+	if maxPatterns > 0 && len(patterns) > maxPatterns {
+		patterns = patterns[:maxPatterns]
+	}
+
+	return patterns
+}
+
+// TotalLogs returns the total number of logs processed (including empty lines).
+func (pe *PatternExtractor) TotalLogs() int {
+	return pe.totalCount
+}
+
 // formatDrainTemplate formats a drain3 cluster template for display
 func formatDrainTemplate(cluster *goDrain.LogCluster) string {
 	if cluster == nil || len(cluster.LogTemplateTokens) == 0 {
