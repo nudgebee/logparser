@@ -11,7 +11,7 @@ import (
 
 func TestParser(t *testing.T) {
 	ch := make(chan LogEntry)
-	parser := NewParser(ch, nil, nil, time.Second, 256)
+	parser := NewParser(ch, nil, nil, time.Second, 256, false)
 
 	ch <- LogEntry{Timestamp: time.Now(), Content: "INFO:root:AWS access key: AKIAUCTZOIG66SPQV67B", Level: LevelInfo}
 
