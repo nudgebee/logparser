@@ -13,6 +13,11 @@ import (
 //go:embed sensitive_patterns.json
 var sensitivePatternsJSON []byte
 
+var (
+	unclassifiedPatternLabel = "unclassified pattern (pattern limit reached)"
+	unclassifiedPatternHash  = "00000000000000000000000000000000"
+)
+
 type LogEntry struct {
 	Timestamp time.Time
 	Content   string
@@ -43,8 +48,10 @@ type PrecompiledPattern struct {
 type Parser struct {
 	decoder Decoder
 
-	patterns map[patternKey]*patternStat
-	lock     sync.RWMutex
+	patterns              map[patternKey]*patternStat
+	patternsPerLevel      map[Level]int
+	patternsPerLevelLimit int
+	lock                  sync.RWMutex
 
 	multilineCollector *MultilineCollector
 
@@ -60,23 +67,21 @@ type Parser struct {
 
 type OnMsgCallbackF func(ts time.Time, level Level, patternHash string, msg string)
 
-func NewParser(ch <-chan LogEntry, decoder Decoder, onMsgCallback OnMsgCallbackF, multilineCollectorTimeout time.Duration, disableSensitiveDataDetection bool) *Parser {
+func NewParser(ch <-chan LogEntry, decoder Decoder, onMsgCallback OnMsgCallbackF, multilineCollectorTimeout time.Duration, patternsPerLevelLimit int) *Parser {
 	p := &Parser{
-		decoder:                          decoder,
-		patterns:                         map[patternKey]*patternStat{},
-		onMsgCb:                          onMsgCallback,
-		sensitivePatterns:                map[sensitivePatternKey]*sensitivePatternStat{},
-		disableSensitivePatternDetection: disableSensitiveDataDetection,
+		decoder:               decoder,
+		patterns:              map[patternKey]*patternStat{},
+		patternsPerLevel:      map[Level]int{},
+		patternsPerLevelLimit: patternsPerLevelLimit,
+		onMsgCb:               onMsgCallback,
+		sensitivePatterns:     map[sensitivePatternKey]*sensitivePatternStat{},
+		disableSensitivePatternDetection: false,
 	}
-	if !disableSensitiveDataDetection {
-		patterns, err := LoadPatterns()
-		if err != nil {
-			log.Printf("Error loading sensitive patterns: %v", err)
-		}
-		p.sensitivePatternsDefinations = patterns
-	} else {
-		p.sensitivePatternsDefinations = []PrecompiledPattern{}
+	patterns, err := LoadPatterns()
+	if err != nil {
+		log.Printf("Error loading sensitive patterns: %v", err)
 	}
+	p.sensitivePatternsDefinations = patterns
 	ctx, stop := context.WithCancel(context.Background())
 	p.stop = stop
 	p.multilineCollector = NewMultilineCollector(ctx, multilineCollectorTimeout, multilineCollectorLimit)
@@ -134,20 +139,7 @@ func (p *Parser) inc(msg Message) {
 	}
 
 	pattern := NewPattern(msg.Content)
-	key := patternKey{level: msg.Level, hash: pattern.Hash()}
-	stat := p.patterns[key]
-	if stat == nil {
-		for k, ps := range p.patterns {
-			if k.level == msg.Level && ps.pattern.WeakEqual(pattern) {
-				stat = ps
-				break
-			}
-		}
-		if stat == nil {
-			stat = &patternStat{pattern: pattern, sample: msg.Content}
-			p.patterns[key] = stat
-		}
-	}
+	stat, key := p.getPatternStat(msg.Level, pattern, msg.Content)
 	if p.onMsgCb != nil {
 		p.onMsgCb(msg.Timestamp, msg.Level, key.hash, msg.Content)
 	}
@@ -178,6 +170,36 @@ func processSensitivePattern(msg Message, p *Parser, pattern *Pattern) {
 		}
 		stat.messages++
 	}
+}
+
+func (p *Parser) getPatternStat(level Level, pattern *Pattern, sample string) (*patternStat, patternKey) {
+	key := patternKey{level: level, hash: pattern.Hash()}
+	if stat := p.patterns[key]; stat != nil {
+		return stat, key
+	}
+	for k, ps := range p.patterns {
+		if k.level != level || ps.pattern == nil {
+			continue
+		}
+		if ps.pattern.WeakEqual(pattern) {
+			return ps, k
+		}
+	}
+
+	if p.patternsPerLevel[level] >= p.patternsPerLevelLimit {
+		fallbackKey := patternKey{level: level, hash: unclassifiedPatternHash}
+		stat := p.patterns[fallbackKey]
+		if stat == nil {
+			stat = &patternStat{sample: unclassifiedPatternLabel}
+			p.patterns[fallbackKey] = stat
+		}
+		return stat, fallbackKey
+	}
+
+	stat := &patternStat{pattern: pattern, sample: sample}
+	p.patterns[key] = stat
+	p.patternsPerLevel[level]++
+	return stat, key
 }
 
 func (p *Parser) GetCounters() []LogCounter {
