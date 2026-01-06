@@ -1,6 +1,6 @@
 module github.com/nudgebee/logparser
 
-go 1.22.2
+go 1.24
 
 require (
 	github.com/jaeyo/go-drain3 v0.1.2
