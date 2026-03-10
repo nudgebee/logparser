@@ -212,23 +212,57 @@ func removeQuotedAndBrackets(s string, buf *bytes.Buffer) string {
 	return buf.String()
 }
 
+// jsonMessageKeys lists the JSON field names (lowercase) used for pattern extraction.
+// Following industry standard (Datadog, New Relic, Elastic, Better Stack), pattern
+// hashing uses only the message/error content, not metadata fields like timestamps,
+// file paths, line numbers, IDs, or data blobs which produce unstable hashes.
+var jsonMessageKeys = []string{"msg", "message", "error", "err", "reason", "log", "text"}
+
+// maxFallbackFieldLen caps individual field values in the fallback path to prevent
+// large data blobs (HTML, XML, stack traces) from overwhelming the pattern.
+const maxFallbackFieldLen = 200
+
 func normalizeJSONLog(line string) string {
 	var m map[string]interface{}
 	if err := json.Unmarshal([]byte(line), &m); err != nil {
-		// not a JSON log, return raw
 		return line
 	}
 
+	// Build a lowercase-key lookup for case-insensitive matching.
+	lowerMap := make(map[string]interface{}, len(m))
+	for k, v := range m {
+		lowerMap[strings.ToLower(k)] = v
+	}
+
+	// Extract only message-relevant fields for stable pattern hashing.
+	var buf strings.Builder
+	for _, k := range jsonMessageKeys {
+		if v, ok := lowerMap[k]; ok {
+			s := fmt.Sprintf("%v", v)
+			if s != "" {
+				buf.WriteString(s)
+				buf.WriteByte(' ')
+			}
+		}
+	}
+	if buf.Len() > 0 {
+		return strings.TrimSpace(buf.String())
+	}
+
+	// Fallback: no known message fields found, use all values sorted by key
+	// with a per-field length cap to prevent data blobs from dominating.
 	var keys []string
 	for k := range m {
 		keys = append(keys, k)
 	}
-	sort.Strings(keys) // sort keys alphabetically
-
-	var buf strings.Builder
+	sort.Strings(keys)
 	for _, k := range keys {
-		strVal := fmt.Sprintf("%v", m[k])
-		buf.WriteString(fmt.Sprintf("%s ", strVal))
+		s := fmt.Sprintf("%v", m[k])
+		if len(s) > maxFallbackFieldLen {
+			s = s[:maxFallbackFieldLen]
+		}
+		buf.WriteString(s)
+		buf.WriteByte(' ')
 	}
-	return strings.TrimSpace(buf.String()) // trim trailing space
+	return strings.TrimSpace(buf.String())
 }

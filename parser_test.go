@@ -13,10 +13,10 @@ func TestParser(t *testing.T) {
 	ch := make(chan LogEntry)
 	parser := NewParser(ch, nil, nil, time.Second, 256, false)
 
-	ch <- LogEntry{Timestamp: time.Now(), Content: "INFO:root:AWS access key: Key", Level: LevelInfo}
+	ch <- LogEntry{Timestamp: time.Now(), Content: "INFO:root:AWS access key: AKIAIOSFODNN7EXAMPLE", Level: LevelInfo}
 
-	// wait for 10 seconds
-	time.Sleep(10 * time.Second)
+	// Wait for multiline collector flush (1s timeout) + processing.
+	time.Sleep(3 * time.Second)
 	counts := parser.GetSensitiveCounters()
 	assert.Equal(t, 1, len(counts))
 	parser.Stop()
