@@ -378,9 +378,6 @@ func LoadPatterns(minConfidence string) ([]PrecompiledPattern, error) {
 	}
 
 	minLevel := confidenceLevel(minConfidence)
-	if minLevel == 0 {
-		minLevel = 2 // default: medium
-	}
 
 	precompiled := make([]PrecompiledPattern, 0, len(patterns))
 	for _, pattern := range patterns {

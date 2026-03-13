@@ -35,12 +35,14 @@ func extractAnchors(regexStr string) []string {
 	// Fallback: extract literal prefix from the regex itself.
 	// Handles patterns like ops_eyJ..., AGE-SECRET-KEY-..., shpat_...
 	cleaned := regexStr
-	for _, pfx := range []string{`\b`, `(?i)`, `(?i)\b`, `^`} {
-		cleaned = strings.TrimPrefix(cleaned, pfx)
-	}
-	// Strip one layer of grouping
-	for _, pfx := range []string{`(?:`, `(`} {
-		cleaned = strings.TrimPrefix(cleaned, pfx)
+	for {
+		n := len(cleaned)
+		for _, pfx := range []string{`\b`, `(?i)`, `^`, `(?:`, `(`} {
+			cleaned = strings.TrimPrefix(cleaned, pfx)
+		}
+		if len(cleaned) == n {
+			break
+		}
 	}
 	lit := leadingLiteral(cleaned)
 	if len(lit) >= 3 {
