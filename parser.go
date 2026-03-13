@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 )
@@ -16,6 +17,13 @@ var sensitivePatternsJSON []byte
 var (
 	unclassifiedPatternLabel = "unclassified pattern (pattern limit reached)"
 	unclassifiedPatternHash  = "00000000000000000000000000000000"
+)
+
+// Shared pattern caches: compiled once, shared across all parsers.
+// Key is the minConfidence level.
+var (
+	patternCacheMu sync.Mutex
+	patternCache   = map[string][]PrecompiledPattern{}
 )
 
 type LogEntry struct {
@@ -41,8 +49,27 @@ type SensitiveLogCounter struct {
 }
 
 type PrecompiledPattern struct {
-	Name    string
-	Pattern *regexp.Regexp
+	Name       string
+	Pattern    *regexp.Regexp
+	Anchors    []string // lowercased literal strings for pre-filtering
+	Confidence string   // "high", "medium", "low"
+}
+
+// SensitiveConfig controls sensitive data detection behavior.
+type SensitiveConfig struct {
+	// Enabled turns on sensitive data detection in log lines.
+	Enabled bool
+	// SampleRate controls how many lines are checked: 1-in-N.
+	// 0 or 1 means every line is checked.
+	SampleRate int
+	// MinConfidence filters patterns by confidence level.
+	// "high" = only distinctive-prefix patterns (lowest FP rate)
+	// "medium" = high + service-keyword patterns (default)
+	// "low" = all patterns including generic ones (highest FP rate)
+	MinConfidence string
+	// MaxDetections caps unique sensitive patterns tracked per parser.
+	// 0 means no limit.
+	MaxDetections int
 }
 
 type Parser struct {
@@ -57,17 +84,17 @@ type Parser struct {
 
 	stop func()
 
-	onMsgCb                      OnMsgCallbackF
-	sensitivePatternsDefinations []PrecompiledPattern
+	onMsgCb                     OnMsgCallbackF
+	sensitivePatternDefinitions []PrecompiledPattern
 
 	sensitivePatterns map[sensitivePatternKey]*sensitivePatternStat
-
-	disableSensitivePatternDetection bool
+	sensitiveConfig   SensitiveConfig
+	sensitiveCounter  uint64
 }
 
 type OnMsgCallbackF func(ts time.Time, level Level, patternHash string, msg string)
 
-func NewParser(ch <-chan LogEntry, decoder Decoder, onMsgCallback OnMsgCallbackF, multilineCollectorTimeout time.Duration, patternsPerLevelLimit int, disableSensitiveDataDetection bool) *Parser {
+func NewParser(ch <-chan LogEntry, decoder Decoder, onMsgCallback OnMsgCallbackF, multilineCollectorTimeout time.Duration, patternsPerLevelLimit int, sensitiveCfg SensitiveConfig) *Parser {
 	p := &Parser{
 		decoder:               decoder,
 		patterns:              map[patternKey]*patternStat{},
@@ -75,16 +102,14 @@ func NewParser(ch <-chan LogEntry, decoder Decoder, onMsgCallback OnMsgCallbackF
 		patternsPerLevelLimit: patternsPerLevelLimit,
 		onMsgCb:               onMsgCallback,
 		sensitivePatterns:     map[sensitivePatternKey]*sensitivePatternStat{},
-		disableSensitivePatternDetection: disableSensitiveDataDetection,
+		sensitiveConfig:       sensitiveCfg,
 	}
-	if !disableSensitiveDataDetection {
-		patterns, err := LoadPatterns()
+	if sensitiveCfg.Enabled {
+		patterns, err := getOrLoadPatterns(sensitiveCfg.MinConfidence)
 		if err != nil {
 			log.Printf("Error loading sensitive patterns: %v", err)
 		}
-		p.sensitivePatternsDefinations = patterns
-	} else {
-		p.sensitivePatternsDefinations = []PrecompiledPattern{}
+		p.sensitivePatternDefinitions = patterns
 	}
 	ctx, stop := context.WithCancel(context.Background())
 	p.stop = stop
@@ -138,7 +163,7 @@ func (p *Parser) inc(msg Message) {
 			p.onMsgCb(msg.Timestamp, msg.Level, "", msg.Content)
 		}
 		pattern := NewPattern(msg.Content)
-		processSensitivePattern(msg, p, pattern)
+		p.processSensitivePattern(msg, pattern)
 		return
 	}
 
@@ -148,16 +173,27 @@ func (p *Parser) inc(msg Message) {
 		p.onMsgCb(msg.Timestamp, msg.Level, key.hash, msg.Content)
 	}
 	stat.messages++
-	processSensitivePattern(msg, p, pattern)
-
+	p.processSensitivePattern(msg, pattern)
 }
 
-func processSensitivePattern(msg Message, p *Parser, pattern *Pattern) {
-	if p.disableSensitivePatternDetection {
+func (p *Parser) processSensitivePattern(msg Message, pattern *Pattern) {
+	if !p.sensitiveConfig.Enabled {
 		return
 	}
-	matchs := DetectSensitiveData(msg.Content, pattern.Hash(), p.sensitivePatternsDefinations)
-	for _, match := range matchs {
+
+	// Sampling: only check 1-in-N lines.
+	p.sensitiveCounter++
+	if p.sensitiveConfig.SampleRate > 1 && p.sensitiveCounter%uint64(p.sensitiveConfig.SampleRate) != 0 {
+		return
+	}
+
+	// Detection cap: stop scanning once we've tracked enough unique patterns.
+	if p.sensitiveConfig.MaxDetections > 0 && len(p.sensitivePatterns) >= p.sensitiveConfig.MaxDetections {
+		return
+	}
+
+	matches := DetectSensitiveData(msg.Content, pattern.Hash(), p.sensitivePatternDefinitions)
+	for _, match := range matches {
 		sKey := match.sensitivePatternKey
 		stat := p.sensitivePatterns[sKey]
 		if stat == nil {
@@ -253,8 +289,9 @@ type sensitivePatternKey struct {
 }
 
 type SensitivePattern struct {
-	Name    string `json:"name"`
-	Pattern string `json:"pattern"`
+	Name       string `json:"name"`
+	Pattern    string `json:"pattern"`
+	Confidence string `json:"confidence,omitempty"`
 }
 
 type SensitivePatternMatch struct {
@@ -264,38 +301,107 @@ type SensitivePatternMatch struct {
 	hash                string
 }
 
+// confidenceLevel returns a numeric level for sorting: high=3, medium=2, low=1.
+func confidenceLevel(c string) int {
+	switch c {
+	case "high":
+		return 3
+	case "medium":
+		return 2
+	case "low":
+		return 1
+	default:
+		return 2 // default to medium
+	}
+}
+
+// DetectSensitiveData scans a log line against precompiled patterns using
+// anchor-based pre-filtering to skip patterns that can't possibly match.
 func DetectSensitiveData(line string, hash string, precompiledPatterns []PrecompiledPattern) []SensitivePatternMatch {
-	matches := []SensitivePatternMatch{}
-	for _, precompiled := range precompiledPatterns {
-		if precompiled.Pattern.MatchString(line) {
-			sensitivePart := precompiled.Pattern.FindString(line)
+	var matches []SensitivePatternMatch
+	lowerLine := strings.ToLower(line)
+
+	for i := range precompiledPatterns {
+		p := &precompiledPatterns[i]
+
+		// Pre-filter: if the pattern has anchors, at least one must appear in the line.
+		if len(p.Anchors) > 0 && !anchorMatchesLine(lowerLine, p.Anchors) {
+			continue
+		}
+
+		if p.Pattern.MatchString(line) {
+			sensitivePart := p.Pattern.FindString(line)
+
+			// Post-match validation for low-confidence patterns:
+			// reject matches where the captured value doesn't look like a real secret
+			// (e.g., SQL table names, cache keys, enum values).
+			if p.Confidence == "low" && !looksLikeSecret(sensitivePart) {
+				continue
+			}
+
 			key := sensitivePatternKey{
 				pattern: sensitivePart,
 				hash:    hash,
 			}
-			matches = append(matches, SensitivePatternMatch{name: precompiled.Name, sensitivePatternKey: key, regex: precompiled.Pattern.String(), hash: hash})
+			matches = append(matches, SensitivePatternMatch{name: p.Name, sensitivePatternKey: key, regex: p.Pattern.String(), hash: hash})
 			break
 		}
 	}
 	return matches
 }
 
-func LoadPatterns() ([]PrecompiledPattern, error) {
+// getOrLoadPatterns returns a shared, cached pattern set for the given
+// confidence level. Compiled regexes are loaded once and reused across all
+// parsers — avoids duplicating ~2 MB of compiled regex state per container.
+func getOrLoadPatterns(minConfidence string) ([]PrecompiledPattern, error) {
+	patternCacheMu.Lock()
+	defer patternCacheMu.Unlock()
+
+	if cached, ok := patternCache[minConfidence]; ok {
+		return cached, nil
+	}
+	patterns, err := LoadPatterns(minConfidence)
+	if err != nil {
+		return nil, err
+	}
+	patternCache[minConfidence] = patterns
+	return patterns, nil
+}
+
+// LoadPatterns loads and compiles sensitive data patterns, filtering by
+// minimum confidence level. Patterns below minConfidence are excluded.
+func LoadPatterns(minConfidence string) ([]PrecompiledPattern, error) {
 	var patterns []SensitivePattern
 	err := json.Unmarshal(sensitivePatternsJSON, &patterns)
 	if err != nil {
 		return nil, err
 	}
-	precompiled := []PrecompiledPattern{}
+
+	minLevel := confidenceLevel(minConfidence)
+	if minLevel == 0 {
+		minLevel = 2 // default: medium
+	}
+
+	precompiled := make([]PrecompiledPattern, 0, len(patterns))
 	for _, pattern := range patterns {
+		confidence := pattern.Confidence
+		if confidence == "" {
+			confidence = "medium"
+		}
+		if confidenceLevel(confidence) < minLevel {
+			continue
+		}
+
 		re, err := regexp.Compile(pattern.Pattern)
 		if err != nil {
 			log.Printf("Error compiling pattern '%s': %v", pattern.Name, err)
 			continue
 		}
 		precompiled = append(precompiled, PrecompiledPattern{
-			Name:    pattern.Name,
-			Pattern: re,
+			Name:       pattern.Name,
+			Pattern:    re,
+			Anchors:    extractAnchors(pattern.Pattern),
+			Confidence: confidence,
 		})
 	}
 	return precompiled, nil
