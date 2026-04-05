@@ -99,6 +99,51 @@ func TestParserMinConfidence(t *testing.T) {
 	}
 }
 
+func TestParserJSONLevelOverride(t *testing.T) {
+	// Verify that JSON structured level overrides GuessLevel in the full pipeline.
+	// An INFO log with "error" in the message must NOT be pattern-grouped as error.
+	p := &Parser{
+		patterns:              map[patternKey]*patternStat{},
+		patternsPerLevel:      map[Level]int{},
+		patternsPerLevelLimit: 256,
+		sensitivePatterns:     map[sensitivePatternKey]*sensitivePatternStat{},
+	}
+
+	// This JSON log has level=INFO but "error" in the msg and "ErrorRate" in type.
+	// Old GuessLevel would misclassify based on text scanning.
+	p.inc(Message{
+		Timestamp: time.Now(),
+		Content:   `{"time":"2026-04-05T06:02:13Z","level":"INFO","msg":"anomaly: processing anomaly","type":"ErrorRate"}`,
+		Level:     LevelUnknown, // as set by multiline collector's GuessLevel
+	})
+
+	// Should be counted as INFO with empty hash (no pattern grouping)
+	counters := p.GetCounters()
+	require.Equal(t, 1, len(counters))
+	assert.Equal(t, LevelInfo, counters[0].Level)
+	assert.Equal(t, "", counters[0].Hash, "INFO logs should have empty pattern hash")
+
+	// Verify no error-level patterns were created
+	assert.Equal(t, 0, p.patternsPerLevel[LevelError])
+
+	// Now send an actual ERROR JSON log
+	p.inc(Message{
+		Timestamp: time.Now(),
+		Content:   `{"time":"2026-04-05T06:02:14Z","level":"ERROR","msg":"connection timeout","err":"dial tcp: timeout"}`,
+		Level:     LevelUnknown,
+	})
+
+	counters = p.GetCounters()
+	var errorCounters []LogCounter
+	for _, c := range counters {
+		if c.Level == LevelError {
+			errorCounters = append(errorCounters, c)
+		}
+	}
+	require.Equal(t, 1, len(errorCounters))
+	assert.NotEmpty(t, errorCounters[0].Hash, "ERROR logs should have a pattern hash")
+}
+
 func TestParserCardinalityLimit(t *testing.T) {
 	p := &Parser{
 		patterns:              map[patternKey]*patternStat{},

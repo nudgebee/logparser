@@ -153,6 +153,14 @@ func (p *Parser) inc(msg Message) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
+	// Single-pass structured log parsing: extract both normalized message
+	// and authoritative level from JSON/logfmt fields. This replaces the
+	// unreliable GuessLevel text-scan for structured logs.
+	normalizedContent, structuredLevel := ParseStructuredLog(msg.Content)
+	if structuredLevel != LevelUnknown {
+		msg.Level = structuredLevel
+	}
+
 	if msg.Level == LevelUnknown || msg.Level == LevelDebug || msg.Level == LevelInfo {
 		key := patternKey{level: msg.Level, hash: ""}
 		if stat := p.patterns[key]; stat == nil {
@@ -162,12 +170,12 @@ func (p *Parser) inc(msg Message) {
 		if p.onMsgCb != nil {
 			p.onMsgCb(msg.Timestamp, msg.Level, "", msg.Content)
 		}
-		pattern := NewPattern(msg.Content)
+		pattern := NewPatternFromNormalized(normalizedContent)
 		p.processSensitivePattern(msg, pattern)
 		return
 	}
 
-	pattern := NewPattern(msg.Content)
+	pattern := NewPatternFromNormalized(normalizedContent)
 	stat, key := p.getPatternStat(msg.Level, pattern, msg.Content)
 	if p.onMsgCb != nil {
 		p.onMsgCb(msg.Timestamp, msg.Level, key.hash, msg.Content)

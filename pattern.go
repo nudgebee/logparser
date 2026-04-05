@@ -89,12 +89,24 @@ func (p *Pattern) WeakEqual(other *Pattern) bool {
 }
 
 func NewPattern(input string) *Pattern {
+	if strings.HasPrefix(strings.TrimSpace(input), "{") {
+		if msg, _, ok := parseJSONLog(input); ok {
+			input = msg
+		}
+	}
+	return newPatternFromNormalized(input)
+}
+
+// NewPatternFromNormalized creates a Pattern from already-normalized content
+// (e.g., the message output of ParseStructuredLog). Skips JSON/logfmt detection.
+func NewPatternFromNormalized(input string) *Pattern {
+	return newPatternFromNormalized(input)
+}
+
+func newPatternFromNormalized(input string) *Pattern {
 	pattern := &Pattern{}
 	buf := buffers.Get().(*bytes.Buffer)
 
-	if strings.HasPrefix(strings.TrimSpace(input), "{") {
-		input = normalizeJSONLog(input)
-	}
 	buf.Reset()
 	for _, p := range strings.Fields(removeQuotedAndBrackets(input, buf)) {
 		p = strings.TrimRight(p, "=:],;")
@@ -218,14 +230,21 @@ func removeQuotedAndBrackets(s string, buf *bytes.Buffer) string {
 // file paths, line numbers, IDs, or data blobs which produce unstable hashes.
 var jsonMessageKeys = []string{"msg", "message", "error", "err", "reason", "log", "text"}
 
+// jsonLevelKeys lists the JSON field names (lowercase) checked for log level.
+// Covers: slog/zerolog/zap (level), GCP/Stackdriver (severity), Bunyan (lvl),
+// Python logging (levelname), and common variants.
+var jsonLevelKeys = []string{"level", "severity", "lvl", "log.level", "loglevel", "log_level", "levelname", "log_type"}
+
 // maxFallbackFieldLen caps individual field values in the fallback path to prevent
 // large data blobs (HTML, XML, stack traces) from overwhelming the pattern.
 const maxFallbackFieldLen = 200
 
-func normalizeJSONLog(line string) string {
+// parseJSONLog parses a JSON log line, extracting the normalized message content
+// and the structured log level. Returns ok=false if the line is not valid JSON.
+func parseJSONLog(line string) (message string, level Level, ok bool) {
 	var m map[string]interface{}
 	if err := json.Unmarshal([]byte(line), &m); err != nil {
-		return line
+		return line, LevelUnknown, false
 	}
 
 	// Build a lowercase-key lookup for case-insensitive matching.
@@ -234,10 +253,21 @@ func normalizeJSONLog(line string) string {
 		lowerMap[strings.ToLower(k)] = v
 	}
 
+	// Extract level from structured field.
+	level = LevelUnknown
+	for _, k := range jsonLevelKeys {
+		if v, found := lowerMap[k]; found {
+			if s, isStr := v.(string); isStr {
+				level = parseLevelValue(s)
+			}
+			break
+		}
+	}
+
 	// Extract only message-relevant fields for stable pattern hashing.
 	var buf strings.Builder
 	for _, k := range jsonMessageKeys {
-		if v, ok := lowerMap[k]; ok {
+		if v, found := lowerMap[k]; found {
 			s := fmt.Sprintf("%v", v)
 			if s != "" {
 				buf.WriteString(s)
@@ -246,7 +276,7 @@ func normalizeJSONLog(line string) string {
 		}
 	}
 	if buf.Len() > 0 {
-		return strings.TrimSpace(buf.String())
+		return strings.TrimSpace(buf.String()), level, true
 	}
 
 	// Fallback: no known message fields found, use all values sorted by key
@@ -264,5 +294,27 @@ func normalizeJSONLog(line string) string {
 		buf.WriteString(s)
 		buf.WriteByte(' ')
 	}
-	return strings.TrimSpace(buf.String())
+	return strings.TrimSpace(buf.String()), level, true
+}
+
+// ParseStructuredLog attempts to parse a log line as a structured format
+// (JSON or logfmt), extracting the normalized message content and level.
+// For unstructured logs, returns the original content and GuessLevel result.
+func ParseStructuredLog(line string) (message string, level Level) {
+	trimmed := strings.TrimSpace(line)
+
+	// JSON logs
+	if strings.HasPrefix(trimmed, "{") {
+		if msg, lvl, ok := parseJSONLog(line); ok {
+			return msg, lvl
+		}
+	}
+
+	// logfmt logs
+	if lvl, ok := parseLogfmtLevel(line); ok {
+		return line, lvl
+	}
+
+	// Unstructured: fall back to text heuristic
+	return line, GuessLevel(line)
 }
