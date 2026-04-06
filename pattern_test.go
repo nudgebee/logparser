@@ -361,6 +361,118 @@ func TestJsonPatternBulkLokiLogs(t *testing.T) {
 	}
 }
 
+func TestParseStructuredLogJSON(t *testing.T) {
+	// Basic JSON level extraction
+	msg, level := ParseStructuredLog(`{"level":"error","msg":"connection timeout"}`)
+	assert.Equal(t, LevelError, level)
+	assert.Contains(t, msg, "connection")
+	assert.Contains(t, msg, "timeout")
+
+	// slog format with uppercase level
+	msg, level = ParseStructuredLog(`{"time":"2026-04-05T06:02:13Z","level":"ERROR","msg":"legacy proxy request failed","err":"query failed"}`)
+	assert.Equal(t, LevelError, level)
+	assert.Contains(t, msg, "legacy")
+
+	// Python logging with "levelname" key
+	_, level = ParseStructuredLog(`{"asctime":"2025-04-03","levelname":"ERROR","message":"db connection failed"}`)
+	assert.Equal(t, LevelError, level)
+
+	// "severity" key (GCP/Stackdriver)
+	_, level = ParseStructuredLog(`{"severity":"WARNING","message":"disk usage high"}`)
+	assert.Equal(t, LevelWarning, level)
+}
+
+func TestParseStructuredLogJSONNoFalsePositive(t *testing.T) {
+	// THE KEY REGRESSION TEST: "error" in message content must NOT override
+	// the structured "level":"INFO" field.
+	_, level := ParseStructuredLog(`{"level":"info","msg":"connection error occurred"}`)
+	assert.Equal(t, LevelInfo, level, "structured level must win over message content")
+
+	// "fatal" in data field must NOT override INFO level
+	_, level = ParseStructuredLog(`{"level":"INFO","msg":"step complete","data":{"observation":"fatal: destination already exists"}}`)
+	assert.Equal(t, LevelInfo, level, "structured level must win over nested data content")
+
+	// "ErrorRate" in type field must NOT override INFO level
+	_, level = ParseStructuredLog(`{"time":"2026-04-05T06:02:13Z","level":"INFO","msg":"anomaly: processing anomaly","type":"ErrorRate"}`)
+	assert.Equal(t, LevelInfo, level, "structured level must win over other field values")
+
+	// "error" as a JSON key (for message extraction) must NOT affect level
+	_, level = ParseStructuredLog(`{"level":"warn","msg":"retrying","error":"connection refused"}`)
+	assert.Equal(t, LevelWarning, level)
+
+	// Debug level preserved even with "critical" in message
+	_, level = ParseStructuredLog(`{"level":"debug","msg":"critical path analysis complete"}`)
+	assert.Equal(t, LevelDebug, level)
+}
+
+func TestParseStructuredLogLogfmt(t *testing.T) {
+	// Basic logfmt
+	msg, level := ParseStructuredLog(`ts=2024-01-15T10:30:45Z level=error msg="request failed" duration=45ms`)
+	assert.Equal(t, LevelError, level)
+	assert.Contains(t, msg, "level=error")
+
+	// Quoted value
+	_, level = ParseStructuredLog(`ts=2024-01-15T10:30:45Z level="warning" msg="disk full"`)
+	assert.Equal(t, LevelWarning, level)
+
+	// lvl= variant
+	_, level = ParseStructuredLog(`ts=2024-01-15 lvl=info msg="started"`)
+	assert.Equal(t, LevelInfo, level)
+
+	// severity= variant
+	_, level = ParseStructuredLog(`severity=error component=api msg="timeout"`)
+	assert.Equal(t, LevelError, level)
+}
+
+func TestParseStructuredLogFallback(t *testing.T) {
+	// Unstructured text falls back to GuessLevel
+	msg, level := ParseStructuredLog(`2024/01/15 10:30:45 [error] something went wrong`)
+	assert.Equal(t, LevelError, level)
+	assert.Equal(t, `2024/01/15 10:30:45 [error] something went wrong`, msg)
+
+	// glog format
+	_, level = ParseStructuredLog(`E0504 07:38:36.184861       1 replica_set.go:450] Sync failed`)
+	assert.Equal(t, LevelError, level)
+
+	// No level keywords
+	msg, level = ParseStructuredLog(`some random log line without level`)
+	assert.Equal(t, LevelUnknown, level)
+	assert.Equal(t, `some random log line without level`, msg)
+}
+
+func TestParseStructuredLogJSONNoLevel(t *testing.T) {
+	// JSON without a level field: returns LevelUnknown (not a false positive from content)
+	_, level := ParseStructuredLog(`{"timestamp":"2024-01-15","event":"step_complete","message":"done"}`)
+	assert.Equal(t, LevelUnknown, level)
+}
+
+func BenchmarkParseStructuredLogJSON(b *testing.B) {
+	line := `{"time":"2026-04-05T06:02:13Z","level":"ERROR","msg":"legacy proxy request failed","action":"db_query","err":"query execution failed"}`
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		ParseStructuredLog(line)
+	}
+}
+
+func BenchmarkParseStructuredLogLogfmt(b *testing.B) {
+	line := `ts=2024-01-15T10:30:45.123Z level=error caller=handler.go:45 msg="request failed" duration=45ms`
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		ParseStructuredLog(line)
+	}
+}
+
+func BenchmarkParseStructuredLogUnstructured(b *testing.B) {
+	line := `2024-01-15T10:30:45.123Z INFO  [http-handler] Request processed: method=GET path=/api/v1/users status=200`
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		ParseStructuredLog(line)
+	}
+}
+
 func min(a, b int) int {
 	if a < b {
 		return a

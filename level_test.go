@@ -21,6 +21,55 @@ func TestGuessLevelRedis(t *testing.T) {
 	assert.Equal(t, LevelDebug, GuessLevel(`1:S 12 Nov 2019 07:52:11.999 . verbosed`))
 }
 
+func TestParseLevelValue(t *testing.T) {
+	// Error variants
+	assert.Equal(t, LevelError, parseLevelValue("error"))
+	assert.Equal(t, LevelError, parseLevelValue("ERROR"))
+	assert.Equal(t, LevelError, parseLevelValue("Error"))
+	assert.Equal(t, LevelError, parseLevelValue("err"))
+	assert.Equal(t, LevelError, parseLevelValue("ERR"))
+
+	// Info variants
+	assert.Equal(t, LevelInfo, parseLevelValue("info"))
+	assert.Equal(t, LevelInfo, parseLevelValue("INFO"))
+	assert.Equal(t, LevelInfo, parseLevelValue("inf"))
+	assert.Equal(t, LevelInfo, parseLevelValue("notice"))
+	assert.Equal(t, LevelInfo, parseLevelValue("informational"))
+
+	// Warning variants
+	assert.Equal(t, LevelWarning, parseLevelValue("warn"))
+	assert.Equal(t, LevelWarning, parseLevelValue("WARN"))
+	assert.Equal(t, LevelWarning, parseLevelValue("warning"))
+	assert.Equal(t, LevelWarning, parseLevelValue("WARNING"))
+	assert.Equal(t, LevelWarning, parseLevelValue("wrn"))
+
+	// Debug variants
+	assert.Equal(t, LevelDebug, parseLevelValue("debug"))
+	assert.Equal(t, LevelDebug, parseLevelValue("DEBUG"))
+	assert.Equal(t, LevelDebug, parseLevelValue("dbg"))
+	assert.Equal(t, LevelDebug, parseLevelValue("trace"))
+	assert.Equal(t, LevelDebug, parseLevelValue("trc"))
+
+	// Critical/Fatal variants
+	assert.Equal(t, LevelCritical, parseLevelValue("fatal"))
+	assert.Equal(t, LevelCritical, parseLevelValue("FATAL"))
+	assert.Equal(t, LevelCritical, parseLevelValue("critical"))
+	assert.Equal(t, LevelCritical, parseLevelValue("crit"))
+	assert.Equal(t, LevelCritical, parseLevelValue("panic"))
+	assert.Equal(t, LevelCritical, parseLevelValue("dpanic"))
+	assert.Equal(t, LevelCritical, parseLevelValue("alert"))
+	assert.Equal(t, LevelCritical, parseLevelValue("emerg"))
+	assert.Equal(t, LevelCritical, parseLevelValue("emergency"))
+
+	// Unknown
+	assert.Equal(t, LevelUnknown, parseLevelValue("custom"))
+	assert.Equal(t, LevelUnknown, parseLevelValue(""))
+	assert.Equal(t, LevelUnknown, parseLevelValue("verbose"))
+
+	// Whitespace handling
+	assert.Equal(t, LevelError, parseLevelValue("  error  "))
+}
+
 func TestGuessLevel(t *testing.T) {
 	assert.Equal(t, LevelError, GuessLevel(`[Sat Dec 04 04:51:18 2020] [error] mod_jk child workerEnv in error state 6`))
 	assert.Equal(t, LevelInfo, GuessLevel(`[info:2016-02-16T16:04:05.930-08:00] Some log text here`))
