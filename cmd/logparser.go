@@ -141,7 +141,7 @@ func runClusterMode(screenWidth, maxPatterns int) {
 		fmt.Printf("     Example: %s\n", example)
 	}
 
-	fmt.Printf("\n" + strings.Repeat("=", screenWidth) + "\n")
+	fmt.Println("\n" + strings.Repeat("=", screenWidth))
 }
 
 func order(counters []logparser.LogCounter) {

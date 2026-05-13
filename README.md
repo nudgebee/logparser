@@ -1,12 +1,16 @@
 # Logparser
 
-*Logparser* is a log parsing library used by [node-agent](https://github.com/coroot/coroot-node-agent) and [aws-agent](https://github.com/coroot/coroot-aws-agent) to extract metrics from unstructured logs.
-Also in this repository, you can find a CLI tool that calculates a log summary from `stdin`.
+*Logparser* is a log parsing library that extracts metrics, levels, and patterns from unstructured logs.
+It also ships a CLI tool that calculates a log summary from `stdin`.
+
+## About this fork
+
+This repository is a fork of [coroot/logparser](https://github.com/coroot/logparser), maintained by [Nudgebee](https://github.com/nudgebee) as part of the [nudgebee/nudgebee](https://github.com/nudgebee/nudgebee) project. Files in this repository have been modified from the upstream version; see the commit history for the full list of changes. The original work is licensed under the Apache License, Version 2.0, and this fork is distributed under the same license.
 
 ## Run
 
 ```shell
-cat some.log | docker run -i --rm ghcr.io/coroot/logparser
+cat some.log | docker run -i --rm ghcr.io/nudgebee/logparser
 ```
 
 ## Sample output
@@ -31,7 +35,6 @@ cat some.log | docker run -i --rm ghcr.io/coroot/logparser
   info: 667
 ```
 
-
 ## License
 
-Logparser is licensed under the [Apache License, Version 2.0](https://github.com/coroot/logparser/blob/main/LICENSE).
+Logparser is licensed under the [Apache License, Version 2.0](./LICENSE). The original work is © the coroot/logparser authors; modifications in this fork are © Nudgebee and contributors, distributed under the same license.
