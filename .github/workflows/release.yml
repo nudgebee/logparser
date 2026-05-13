@@ -36,7 +36,7 @@ jobs:
             type=ref,event=pr
             type=semver,pattern={{version}}
 
-      - uses: docker/build-push-action@v5
+      - uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64
