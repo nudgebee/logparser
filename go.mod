@@ -4,7 +4,7 @@ go 1.24
 
 require (
 	github.com/jaeyo/go-drain3 v0.1.2
-	github.com/stretchr/testify v1.9.0
+	github.com/stretchr/testify v1.11.1
 )
 
 require (
