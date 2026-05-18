@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"testing"
 	"time"
 )
@@ -64,10 +65,21 @@ func fetchLokiLogs(lokiURL, podName string, limit int) ([]string, error) {
 
 // TestLokiBenchmark fetches real logs from Loki and benchmarks sensitive data detection.
 // Run with: go test -v -run TestLokiBenchmark -timeout 60s -count=1
-// Requires Loki at localhost:3100 with services-server pod logs.
+// Configure via env vars:
+//
+//	LOKI_URL  — Loki base URL (default: http://localhost:3100)
+//	LOKI_POD  — pod name prefix to query (default: example-pod)
+//
+// The test is skipped if Loki is unreachable, so it stays a no-op in CI.
 func TestLokiBenchmark(t *testing.T) {
-	lokiURL := "http://localhost:3100"
-	podName := "services-server"
+	lokiURL := os.Getenv("LOKI_URL")
+	if lokiURL == "" {
+		lokiURL = "http://localhost:3100"
+	}
+	podName := os.Getenv("LOKI_POD")
+	if podName == "" {
+		podName = "example-pod"
+	}
 	logLimit := 5000
 
 	t.Logf("Fetching up to %d logs from Loki for pod %s...", logLimit, podName)

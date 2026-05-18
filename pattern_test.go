@@ -191,15 +191,15 @@ func TestJsonPatternRealLokiLogs(t *testing.T) {
 	// --- Go structured logs (zerolog "msg" key) ---
 
 	// Same msg, different metadata (account_id, trace_id, timestamps) → same hash.
-	goLog1 := `{"time":"2026-03-10T06:00:32.76936812Z","level":"ERROR","msg":"tool execution error","account_id":"a2a30b02-0f67-42e5-a2ab-c658230fd798","session_id":"094b32cb-f980-49a9-9152-c9c7c4b83349","user_id":"af4cb6af-1254-421d-bfa5-ffcfe649017e","tenant_id":"890cad87-c452-4aa7-b84a-742cee0454a1","trace_id":"d1540fb0a887608c10dbe8f6b37683f7","file":"/app/agents/core/executor_planner.go","line":2177,"error":"workspace /analyze call failed: proxy call failed: unknown","tool":"agent_code_2"}`
-	goLog2 := `{"time":"2026-03-10T07:15:00.000000000Z","level":"ERROR","msg":"tool execution error","account_id":"bbbbbbbb-0000-0000-0000-000000000000","session_id":"aaaaaaaa-0000-0000-0000-000000000000","user_id":"cccccccc-0000-0000-0000-000000000000","tenant_id":"dddddddd-0000-0000-0000-000000000000","trace_id":"eeeeeeee0000000000000000","file":"/app/agents/core/executor_planner.go","line":2177,"error":"workspace /analyze call failed: proxy call failed: unknown","tool":"agent_code_2"}`
+	goLog1 := `{"time":"2026-03-10T06:00:32.76936812Z","level":"ERROR","msg":"tool execution error","account_id":"11111111-0000-0000-0000-000000000000","session_id":"22222222-0000-0000-0000-000000000000","user_id":"33333333-0000-0000-0000-000000000000","tenant_id":"44444444-0000-0000-0000-000000000000","trace_id":"55555555000000000000000000000000","file":"/app/example/planner.go","line":2177,"error":"workspace /analyze call failed: proxy call failed: unknown","tool":"example_tool"}`
+	goLog2 := `{"time":"2026-03-10T07:15:00.000000000Z","level":"ERROR","msg":"tool execution error","account_id":"bbbbbbbb-0000-0000-0000-000000000000","session_id":"aaaaaaaa-0000-0000-0000-000000000000","user_id":"cccccccc-0000-0000-0000-000000000000","tenant_id":"dddddddd-0000-0000-0000-000000000000","trace_id":"eeeeeeee0000000000000000","file":"/app/example/planner.go","line":2177,"error":"workspace /analyze call failed: proxy call failed: unknown","tool":"example_tool"}`
 	assert.Equal(t, NewPattern(goLog1).Hash(), NewPattern(goLog2).Hash(),
 		"same msg+error with different metadata should produce same hash")
 	assert.NotEqual(t, emptyHash, NewPattern(goLog1).Hash())
 
 	// Different msg → different hash.
-	goLog3 := `{"time":"2026-03-10T06:00:32.769283951Z","level":"ERROR","msg":"code: failed to execute via workspace","account_id":"a2a30b02","trace_id":"d1540fb0","error":"workspace /analyze call failed: proxy call failed: unknown"}`
-	goLog4 := `{"time":"2026-03-10T06:00:32.769240731Z","level":"ERROR","msg":"workspace: proxy API call failed","account_id":"a2a30b02","trace_id":"d1540fb0","error":"unknown"}`
+	goLog3 := `{"time":"2026-03-10T06:00:32.769283951Z","level":"ERROR","msg":"code: failed to execute via workspace","account_id":"11111111","trace_id":"55555555","error":"workspace /analyze call failed: proxy call failed: unknown"}`
+	goLog4 := `{"time":"2026-03-10T06:00:32.769240731Z","level":"ERROR","msg":"workspace: proxy API call failed","account_id":"11111111","trace_id":"55555555","error":"unknown"}`
 	assert.NotEqual(t, NewPattern(goLog3).Hash(), NewPattern(goLog4).Hash(),
 		"different msg values should produce different hashes")
 
@@ -208,12 +208,12 @@ func TestJsonPatternRealLokiLogs(t *testing.T) {
 	assert.Contains(t, p1.String(), "tool")
 	assert.Contains(t, p1.String(), "execution")
 	assert.Contains(t, p1.String(), "error")
-	assert.NotContains(t, p1.String(), "executor_planner.go",
+	assert.NotContains(t, p1.String(), "planner.go",
 		"file paths should not leak into pattern")
 
 	// --- Go structured logs with nested error object (stringified as map) ---
 
-	goLogNested := `{"time":"2026-03-10T05:52:11.512955513Z","level":"ERROR","msg":"unable to fetch events","accountId":"fc9f8ff5-8c17-421e-b461-18e346832e6c","job_id":"e35f812b-9900-47e5-a31d-6f213becd52e","error":{"message":"failed to list audit events: request failed: context deadline exceeded","type":"*fmt.wrapError"}}`
+	goLogNested := `{"time":"2026-03-10T05:52:11.512955513Z","level":"ERROR","msg":"unable to fetch events","accountId":"66666666-0000-0000-0000-000000000000","job_id":"77777777-0000-0000-0000-000000000000","error":{"message":"failed to list audit events: request failed: context deadline exceeded","type":"*fmt.wrapError"}}`
 	pNested := NewPattern(goLogNested)
 	assert.NotEqual(t, emptyHash, pNested.Hash())
 	assert.Contains(t, pNested.String(), "unable")
@@ -222,7 +222,7 @@ func TestJsonPatternRealLokiLogs(t *testing.T) {
 
 	// --- Go structured log: WARN with error field containing URL ---
 
-	goLogWarn := `{"time":"2026-03-10T06:05:44.826363378Z","level":"WARN","msg":"Primary model failed, analyzing error type","account_id":"a2a30b02","event_id":"d6dffec1","trace_id":"b1ccf7fe","error":"error in stream mode: Post \"https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:streamGenerateContent\": context deadline exceeded","model":"gemini-3-flash-preview"}`
+	goLogWarn := `{"time":"2026-03-10T06:05:44.826363378Z","level":"WARN","msg":"Primary model failed, analyzing error type","account_id":"11111111","event_id":"88888888","trace_id":"99999999","error":"error in stream mode: Post \"https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:streamGenerateContent\": context deadline exceeded","model":"gemini-3-flash-preview"}`
 	pWarn := NewPattern(goLogWarn)
 	assert.NotEqual(t, emptyHash, pWarn.Hash())
 	assert.Contains(t, pWarn.String(), "Primary")
@@ -231,7 +231,7 @@ func TestJsonPatternRealLokiLogs(t *testing.T) {
 
 	// --- Python structured logs ("message" key + "exc_info" key) ---
 
-	pyLog := `{"asctime":"2026-03-10 06:00:44,782","levelname":"ERROR","filename":"search_logic.py","lineno":56,"message":"Error searching collection a2a30b02_long_term_memory: Unexpected Response: 400 (Bad Request)\nRaw response content:\nb'{\"status\":{\"error\":\"Wrong input: Vector dimension error: expected dim: 768, got 3072\"},\"time\":0.000263312}'","exc_info":"Traceback (most recent call last):\n  File \"/app/rag/search/search_logic.py\", line 36\n  response = client.query_points()\n"}`
+	pyLog := `{"asctime":"2026-03-10 06:00:44,782","levelname":"ERROR","filename":"search_logic.py","lineno":56,"message":"Error searching collection example_collection: Unexpected Response: 400 (Bad Request)\nRaw response content:\nb'{\"status\":{\"error\":\"Wrong input: Vector dimension error: expected dim: 768, got 3072\"},\"time\":0.000263312}'","exc_info":"Traceback (most recent call last):\n  File \"/app/example/search_logic.py\", line 36\n  response = client.query_points()\n"}`
 	pPy := NewPattern(pyLog)
 	assert.NotEqual(t, emptyHash, pPy.Hash())
 	assert.Contains(t, pPy.String(), "Error")
@@ -242,7 +242,7 @@ func TestJsonPatternRealLokiLogs(t *testing.T) {
 		"exc_info should not leak into pattern")
 
 	// Same Python error from same collection → same hash even with different traceback.
-	pyLog2 := `{"asctime":"2026-03-10 07:00:00,000","levelname":"ERROR","filename":"other_file.py","lineno":99,"message":"Error searching collection a2a30b02_long_term_memory: Unexpected Response: 400 (Bad Request)\nRaw response content:\nb'{\"status\":{\"error\":\"Wrong input: Vector dimension error: expected dim: 768, got 3072\"},\"time\":0.000263312}'","exc_info":"different traceback here"}`
+	pyLog2 := `{"asctime":"2026-03-10 07:00:00,000","levelname":"ERROR","filename":"other_file.py","lineno":99,"message":"Error searching collection example_collection: Unexpected Response: 400 (Bad Request)\nRaw response content:\nb'{\"status\":{\"error\":\"Wrong input: Vector dimension error: expected dim: 768, got 3072\"},\"time\":0.000263312}'","exc_info":"different traceback here"}`
 	assert.Equal(t, pPy.Hash(), NewPattern(pyLog2).Hash(),
 		"same message with different traceback/filename should produce same hash")
 
@@ -259,8 +259,8 @@ func TestJsonPatternRealLokiLogs(t *testing.T) {
 
 	// --- JSON log with "message" key and large data blob ---
 
-	logWithDataBlob := `{"timestamp":"2026-03-10T06:07:07Z","log_type":"ERROR","event":"tool_failure","message":"Tool failed: cli","data":{"tool_name":"cli"},"duration":"5m39.826611881s","error":"would reformat /tmp/code-analysis--2474322462/nudgebee/notifications-server/notifications_server/message_templates/google_chat/auto_optimize_scheduled_notification.py\nwould reformat /tmp/code-analysis--2474322462/nudgebee/notifications-server/notifications_server/message_templates/google_chat/finding.py\nwould reformat many more files..."}`
-	logWithDataBlob2 := `{"timestamp":"2026-03-10T07:07:07Z","log_type":"ERROR","event":"tool_failure","message":"Tool failed: cli","data":{"tool_name":"cli"},"duration":"2m10.000000000s","error":"would reformat /tmp/code-analysis--9999999999/different/path/file.py"}`
+	logWithDataBlob := `{"timestamp":"2026-03-10T06:07:07Z","log_type":"ERROR","event":"tool_failure","message":"Tool failed: cli","data":{"tool_name":"cli"},"duration":"5m39.826611881s","error":"would reformat /tmp/code-analysis--1111111111/example-org/example-service/example_service/templates/file_a.py\nwould reformat /tmp/code-analysis--1111111111/example-org/example-service/example_service/templates/file_b.py\nwould reformat many more files..."}`
+	logWithDataBlob2 := `{"timestamp":"2026-03-10T07:07:07Z","log_type":"ERROR","event":"tool_failure","message":"Tool failed: cli","data":{"tool_name":"cli"},"duration":"2m10.000000000s","error":"would reformat /tmp/code-analysis--2222222222/different/path/file.py"}`
 	pBlob1 := NewPattern(logWithDataBlob)
 	pBlob2 := NewPattern(logWithDataBlob2)
 	assert.NotEqual(t, emptyHash, pBlob1.Hash())
@@ -272,7 +272,7 @@ func TestJsonPatternRealLokiLogs(t *testing.T) {
 
 	// --- Stability: same msg from different pods/times → same hash ---
 
-	msgVariant1 := `{"time":"2026-03-10T05:52:56.777982952Z","level":"ERROR","msg":"pq: operator does not exist: uuid = text","tenant_id":"890cad87-c452-4aa7-b84a-742cee0454a1","user_id":"30b9833e-f667-4b0b-b2c1-065169968e24","trace_id":"d38476f460117ffcb7fece3edb16311a"}`
+	msgVariant1 := `{"time":"2026-03-10T05:52:56.777982952Z","level":"ERROR","msg":"pq: operator does not exist: uuid = text","tenant_id":"44444444-0000-0000-0000-000000000000","user_id":"33333333-0000-0000-0000-000000000000","trace_id":"55555555000000000000000000000000"}`
 	msgVariant2 := `{"time":"2026-03-11T12:00:00.000000000Z","level":"ERROR","msg":"pq: operator does not exist: uuid = text","tenant_id":"aaaaaaaa-0000-0000-0000-000000000000","user_id":"bbbbbbbb-0000-0000-0000-000000000000","trace_id":"cccccccc0000000000000000"}`
 	assert.Equal(t, NewPattern(msgVariant1).Hash(), NewPattern(msgVariant2).Hash(),
 		"identical msg from different pods/times must produce same hash")
