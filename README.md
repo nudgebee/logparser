@@ -7,6 +7,8 @@ It also ships a CLI tool that calculates a log summary from `stdin`.
 
 This repository is a fork of [coroot/logparser](https://github.com/coroot/logparser), maintained by [Nudgebee](https://github.com/nudgebee) as part of the [nudgebee/nudgebee](https://github.com/nudgebee/nudgebee) project. Files in this repository have been modified from the upstream version; see the commit history for the full list of changes. The original work is licensed under the Apache License, Version 2.0, and this fork is distributed under the same license.
 
+The sensitive-data detection rules in `sensitive_patterns.json` are derived from [gitleaks](https://github.com/gitleaks/gitleaks) (MIT licensed); see [NOTICE](./NOTICE) for the full attribution.
+
 ## Run
 
 ```shell
@@ -14,6 +16,8 @@ cat some.log | docker run -i --rm ghcr.io/nudgebee/logparser
 ```
 
 ## Sample output
+
+The example below is from the [upstream coroot/logparser README](https://github.com/coroot/logparser#readme), processing public Zookeeper logs:
 
 ```shell
 ▇                      12 ( 0%) - ERROR [LearnerHandler-/10.10.34.11:52225:LearnerHandler@562] - Unexpected exception causing shutdown while sock still open
@@ -35,6 +39,26 @@ cat some.log | docker run -i --rm ghcr.io/nudgebee/logparser
   info: 667
 ```
 
+## Drain3 clustering mode
+
+This fork adds a `-cluster` flag that groups log lines into templates using the
+[Drain3](https://github.com/IBM/Drain3) algorithm. It is useful for collapsing
+high-cardinality structured logs into a small number of patterns:
+
+```shell
+cat some.log | docker run -i --rm ghcr.io/nudgebee/logparser -cluster -max-patterns 20
+```
+
+The output lists each detected template with its frequency and an example
+line; see `cmd/logparser.go` for the full set of flags.
+
+## Contributing & security
+
+Bug reports and pull requests are welcome — see [CONTRIBUTING.md](./CONTRIBUTING.md).
+For security issues, please follow [SECURITY.md](./SECURITY.md) instead of
+filing a public issue. By participating you agree to the
+[Code of Conduct](./CODE_OF_CONDUCT.md).
+
 ## License
 
-Logparser is licensed under the [Apache License, Version 2.0](./LICENSE). The original work is © the coroot/logparser authors; modifications in this fork are © Nudgebee and contributors, distributed under the same license.
+Logparser is licensed under the [Apache License, Version 2.0](./LICENSE). The original work is © the coroot/logparser authors; modifications in this fork are © Nudgebee and contributors, distributed under the same license. Bundled third-party content is credited in [NOTICE](./NOTICE).
