@@ -1,1 +1,15 @@
-.idea
+# Editors / IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# Go build artifacts
+/logparser
+/dist/
+*.test
+*.out
+coverage.out
