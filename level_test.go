@@ -21,6 +21,19 @@ func TestGuessLevelRedis(t *testing.T) {
 	assert.Equal(t, LevelDebug, GuessLevel(`1:S 12 Nov 2019 07:52:11.999 . verbosed`))
 }
 
+func TestGuessLevelMySQL(t *testing.T) {
+	// MySQL 8.x
+	assert.Equal(t, LevelInfo, GuessLevel(`2026-09-30T18:48:49.795807Z 8 [Note] [MY-010926] [Server] Access denied for user 'root'@'localhost' (using password: YES)`))
+	assert.Equal(t, LevelInfo, GuessLevel(`2026-09-30T18:33:14.028354Z 0 [System] [MY-010931] [Server] /usr/sbin/mysqld: ready for connections. Version: '8.0.46'  socket: '/var/lib/mysql/mysql.sock'  port: 3306  MySQL Community Server - GPL.`))
+	assert.Equal(t, LevelWarning, GuessLevel(`2026-09-30T18:31:33.217632Z 0 [Warning] [MY-010068] [Server] CA certificate ca.pem is self signed.`))
+	assert.Equal(t, LevelError, GuessLevel(`2026-09-30T18:31:33.217632Z 0 [ERROR] [MY-010119] [Server] Aborting`))
+	// MySQL 5.7
+	assert.Equal(t, LevelInfo, GuessLevel(`2019-05-14T12:32:17.123456Z 0 [Note] InnoDB: Buffer pool(s) load completed at 190514 12:32:17`))
+	// MariaDB
+	assert.Equal(t, LevelInfo, GuessLevel(`2024-01-01 12:00:00 0 [Note] InnoDB: 10.11.6 started; log sequence number 47776; transaction id 14`))
+	assert.Equal(t, LevelWarning, GuessLevel(`2024-01-01 12:00:00 5 [Warning] Access denied for user 'root'@'localhost' (using password: NO)`))
+}
+
 func TestGuessLevel(t *testing.T) {
 	assert.Equal(t, LevelError, GuessLevel(`[Sat Dec 04 04:51:18 2020] [error] mod_jk child workerEnv in error state 6`))
 	assert.Equal(t, LevelInfo, GuessLevel(`[info:2016-02-16T16:04:05.930-08:00] Some log text here`))
