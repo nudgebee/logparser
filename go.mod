@@ -5,6 +5,7 @@ go 1.24
 require (
 	github.com/jaeyo/go-drain3 v0.1.2
 	github.com/stretchr/testify v1.11.1
+	golang.org/x/time v0.12.0
 )
 
 require (

@@ -2,16 +2,18 @@ package logparser
 
 import (
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/time/rate"
 )
 
 func TestParser(t *testing.T) {
 	ch := make(chan LogEntry)
-	parser := NewParser(ch, nil, nil, time.Second, 256, SensitiveConfig{
+	parser := NewParser(ch, nil, nil, time.Second, 256, false, nil, SensitiveConfig{
 		Enabled:       true,
 		MinConfidence: "high",
 	})
@@ -27,7 +29,7 @@ func TestParser(t *testing.T) {
 
 func TestParserSensitiveDisabled(t *testing.T) {
 	ch := make(chan LogEntry)
-	parser := NewParser(ch, nil, nil, time.Second, 256, SensitiveConfig{
+	parser := NewParser(ch, nil, nil, time.Second, 256, false, nil, SensitiveConfig{
 		Enabled: false,
 	})
 
@@ -41,7 +43,7 @@ func TestParserSensitiveDisabled(t *testing.T) {
 func TestParserSensitiveSampling(t *testing.T) {
 	ch := make(chan LogEntry)
 	// Sample 1 in 10 lines
-	parser := NewParser(ch, nil, nil, time.Second, 256, SensitiveConfig{
+	parser := NewParser(ch, nil, nil, time.Second, 256, false, nil, SensitiveConfig{
 		Enabled:       true,
 		SampleRate:    10,
 		MinConfidence: "high",
@@ -67,7 +69,7 @@ func TestParserSensitiveSampling(t *testing.T) {
 
 func TestParserSensitiveMaxDetections(t *testing.T) {
 	ch := make(chan LogEntry)
-	parser := NewParser(ch, nil, nil, time.Second, 256, SensitiveConfig{
+	parser := NewParser(ch, nil, nil, time.Second, 256, false, nil, SensitiveConfig{
 		Enabled:       true,
 		MinConfidence: "high",
 		MaxDetections: 1,
@@ -144,6 +146,40 @@ func TestParserJSONLevelOverride(t *testing.T) {
 	assert.NotEmpty(t, errorCounters[0].Hash, "ERROR logs should have a pattern hash")
 }
 
+func TestParserJson(t *testing.T) {
+	line := `{"level":"error","msg":"payment failed","order_id":"ord-1"}`
+
+	var gotLevel Level
+	var gotMsg string
+	var gotAttrs map[string]string
+	cb := func(ts time.Time, level Level, patternHash string, msg string, attributes map[string]string) {
+		gotLevel, gotMsg, gotAttrs = level, msg, attributes
+	}
+
+	p := &Parser{
+		patterns:              map[patternKey]*patternStat{},
+		patternsPerLevel:      map[Level]int{},
+		patternsPerLevelLimit: 10,
+		parseJson:             true,
+		onMsgCb:               cb,
+	}
+	p.inc(Message{Timestamp: time.Now(), Content: line, Level: LevelUnknown})
+	assert.Equal(t, LevelError, gotLevel)
+	assert.Equal(t, "payment failed", gotMsg)
+	assert.Equal(t, map[string]string{"order_id": "ord-1"}, gotAttrs)
+
+	p = &Parser{
+		patterns:              map[patternKey]*patternStat{},
+		patternsPerLevel:      map[Level]int{},
+		patternsPerLevelLimit: 10,
+		onMsgCb:               cb,
+	}
+	p.inc(Message{Timestamp: time.Now(), Content: line, Level: LevelError})
+	assert.Equal(t, LevelError, gotLevel)
+	assert.Equal(t, line, gotMsg)
+	assert.Nil(t, gotAttrs)
+}
+
 func TestParserCardinalityLimit(t *testing.T) {
 	p := &Parser{
 		patterns:              map[patternKey]*patternStat{},
@@ -177,4 +213,59 @@ func TestParserCardinalityLimit(t *testing.T) {
 	assert.Equal(t, msgs[1], counters[1].Sample)
 	assert.Equal(t, unclassifiedPatternLabel, counters[2].Sample)
 	assert.Equal(t, unclassifiedPatternHash, counters[2].Hash)
+}
+
+func TestParserRateLimit(t *testing.T) {
+	calls, sampled := 0, 0
+	p := &Parser{
+		patterns:              map[patternKey]*patternStat{},
+		patternsPerLevel:      map[Level]int{},
+		patternsPerLevelLimit: 256,
+		limiter:               rate.NewLimiter(0, 3), // never refills
+		onMsgCb: func(ts time.Time, level Level, patternHash string, msg string, attributes map[string]string) {
+			calls++
+			if patternHash == sampledPatternHash {
+				sampled++
+			}
+		},
+	}
+
+	for i := 0; i < 10; i++ {
+		p.inc(Message{Timestamp: time.Now(), Content: "error" + strings.Repeat(" word", i+1), Level: LevelError})
+	}
+
+	assert.Equal(t, 3, p.patternsPerLevel[LevelError])
+	// Over the limit, pattern extraction is skipped but every message is
+	// still emitted, under the sampled pattern hash.
+	assert.Equal(t, 10, calls)
+	assert.Equal(t, 7, sampled)
+
+	stat, ok := p.patterns[patternKey{level: LevelError, hash: sampledPatternHash}]
+	require.True(t, ok)
+	assert.Equal(t, 7, stat.messages)
+	assert.Equal(t, sampledPatternLabel, stat.sample)
+
+	total := 0
+	for _, c := range p.GetCounters() {
+		assert.Equal(t, LevelError, c.Level)
+		total += c.Messages
+	}
+	assert.Equal(t, 10, total)
+}
+
+func TestParserRateLimitLevels(t *testing.T) {
+	p := &Parser{
+		patterns:              map[patternKey]*patternStat{},
+		patternsPerLevel:      map[Level]int{},
+		patternsPerLevelLimit: 256,
+		limiter:               rate.NewLimiter(0, 0), // always over the limit
+	}
+
+	p.inc(Message{Timestamp: time.Now(), Content: "some info message", Level: LevelInfo})
+	p.inc(Message{Timestamp: time.Now(), Content: "some debug message", Level: LevelDebug})
+
+	assert.Equal(t, 1, p.patterns[patternKey{level: LevelInfo, hash: ""}].messages)
+	assert.Equal(t, 1, p.patterns[patternKey{level: LevelDebug, hash: ""}].messages)
+	_, ok := p.patterns[patternKey{level: LevelError, hash: sampledPatternHash}]
+	assert.False(t, ok)
 }

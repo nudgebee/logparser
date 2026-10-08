@@ -224,16 +224,16 @@ func removeQuotedAndBrackets(s string, buf *bytes.Buffer) string {
 	return buf.String()
 }
 
-// jsonMessageKeys lists the JSON field names (lowercase) used for pattern extraction.
+// patternMessageKeys lists the JSON field names (lowercase) used for pattern extraction.
 // Following industry standard (Datadog, New Relic, Elastic, Better Stack), pattern
 // hashing uses only the message/error content, not metadata fields like timestamps,
 // file paths, line numbers, IDs, or data blobs which produce unstable hashes.
-var jsonMessageKeys = []string{"msg", "message", "error", "err", "reason", "log", "text"}
+var patternMessageKeys = []string{"msg", "message", "error", "err", "reason", "log", "text"}
 
-// jsonLevelKeys lists the JSON field names (lowercase) checked for log level.
+// patternLevelKeys lists the JSON field names (lowercase) checked for log level.
 // Covers: slog/zerolog/zap (level), GCP/Stackdriver (severity), Bunyan (lvl),
 // Python logging (levelname), and common variants.
-var jsonLevelKeys = []string{"level", "severity", "lvl", "log.level", "loglevel", "log_level", "levelname", "log_type"}
+var patternLevelKeys = []string{"level", "severity", "lvl", "log.level", "loglevel", "log_level", "levelname", "log_type"}
 
 // maxFallbackFieldLen caps individual field values in the fallback path to prevent
 // large data blobs (HTML, XML, stack traces) from overwhelming the pattern.
@@ -255,7 +255,7 @@ func parseJSONLog(line string) (message string, level Level, ok bool) {
 
 	// Extract level from structured field.
 	level = LevelUnknown
-	for _, k := range jsonLevelKeys {
+	for _, k := range patternLevelKeys {
 		if v, found := lowerMap[k]; found {
 			if s, isStr := v.(string); isStr {
 				level = parseLevelValue(s)
@@ -266,7 +266,7 @@ func parseJSONLog(line string) (message string, level Level, ok bool) {
 
 	// Extract only message-relevant fields for stable pattern hashing.
 	var buf strings.Builder
-	for _, k := range jsonMessageKeys {
+	for _, k := range patternMessageKeys {
 		if v, found := lowerMap[k]; found {
 			s := fmt.Sprintf("%v", v)
 			if s != "" {

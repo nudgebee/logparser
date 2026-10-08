@@ -98,9 +98,9 @@ func (m *MultilineCollector) add(entry LogEntry) {
 	}
 	if len(m.lines) == 0 {
 		m.ts = entry.Timestamp
-		m.level = GuessLevel(entry.Content)
-		if m.level == LevelUnknown && entry.Level != LevelUnknown {
-			m.level = entry.Level
+		m.level = entry.Level // the level reported by the source is trusted, otherwise it is guessed from the content
+		if m.level == LevelUnknown {
+			m.level = GuessLevel(entry.Content)
 		}
 		m.isFirstLineContainsTimestamp = containsTimestamp(entry.Content)
 	}
@@ -122,6 +122,10 @@ func (m *MultilineCollector) add(entry LogEntry) {
 func (m *MultilineCollector) isNextMessage(l string) bool {
 	if l == "" || l == "}" || strings.HasPrefix(l, "\t") || strings.HasPrefix(l, "  ") {
 		return false
+	}
+
+	if strings.HasPrefix(l, `{"`) && strings.HasSuffix(l, "}") {
+		return true
 	}
 
 	if m.isFirstLineContainsTimestamp {

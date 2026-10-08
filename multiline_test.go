@@ -47,6 +47,20 @@ Order response: {"timestamp":1648205755430,"status":406,"error":"Not Acceptable"
 	assert.Equal(t, strings.Split(data, "\n")[1], msgs[1].Content)
 }
 
+func TestMultilineCollectorJsonLines(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	m := NewMultilineCollector(ctx, 10*time.Millisecond, multilineCollectorLimit)
+	defer cancel()
+	data := `{"hit":false,"key":"cart:user-1664","level":"debug","msg":"cache lookup","time":"2026-07-27T13:46:33Z"}
+{"error":"upstream returned status 503","level":"error","msg":"request to upstream failed","time":"2026-07-27T13:46:34Z","upstream":"product-catalog"}
+{"currency":"USD","items":8,"level":"info","msg":"order created","order_id":"ord-003007","time":"2026-07-27T13:46:34Z","total":413.98,"user_id":"user-4735"}`
+	msgs := writeByLine(m, data, time.Unix(0, 0))
+	require.Len(t, msgs, 3)
+	for i, line := range strings.Split(data, "\n") {
+		assert.Equal(t, line, msgs[i].Content)
+	}
+}
+
 func TestMultilineCollectorPython(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	m := NewMultilineCollector(ctx, 10*time.Millisecond, multilineCollectorLimit)
@@ -407,4 +421,18 @@ func TestMultilineCollectorLimit(t *testing.T) {
 	require.Len(t, msgs, 1)
 	assert.Equal(t, 97, len(msgs[0].Content))
 	assert.True(t, utf8.ValidString(msgs[0].Content))
+}
+
+func TestMultilineCollectorReportedLevel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	m := NewMultilineCollector(ctx, 10*time.Millisecond, multilineCollectorLimit)
+	defer cancel()
+
+	m.Add(LogEntry{Timestamp: time.Unix(0, 0), Content: "Memory: avail=27.3G, total=31.1G, warnings=1.0G/500M/100M", Level: LevelInfo})
+	msg := <-m.Messages
+	assert.Equal(t, LevelInfo, msg.Level) // the reported level wins over the guess ("warnings")
+
+	m.Add(LogEntry{Timestamp: time.Unix(1, 0), Content: "ERROR: relation does not exist"})
+	msg = <-m.Messages
+	assert.Equal(t, LevelError, msg.Level) // guessed when no level is reported
 }
