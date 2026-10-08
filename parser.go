@@ -166,17 +166,30 @@ func (p *Parser) inc(msg Message) {
 
 	// Single-pass structured log parsing: extract both normalized message
 	// and authoritative level from JSON/logfmt fields. This replaces the
-	// unreliable GuessLevel text-scan for structured logs.
-	normalizedContent, structuredLevel := ParseStructuredLog(msg.Content)
+	// unreliable GuessLevel text-scan for structured logs. With parseJson, a
+	// JSON line is decoded once, for the pattern content and for the emitted
+	// message and attributes alike.
+	var normalizedContent string
+	var structuredLevel Level
+	var jl *JsonLog
+	if p.parseJson {
+		if fields := decodeJsonObject(msg.Content); fields != nil {
+			normalizedContent, structuredLevel = structuredFromJSON(fields)
+			jl = jsonLogFromFields(fields)
+		}
+	}
+	if jl == nil {
+		normalizedContent, structuredLevel = ParseStructuredLog(msg.Content)
+	}
 	if structuredLevel != LevelUnknown {
 		msg.Level = structuredLevel
 	}
 
-	// With parseJson, a JSON log is emitted as its message, with the other
-	// fields as attributes. Patterns still come from normalizedContent.
+	// A JSON log is emitted as its message, with the other fields as
+	// attributes. Patterns still come from normalizedContent.
 	content := msg.Content
 	var attributes map[string]string
-	if jl := p.parseJsonLog(content); jl != nil {
+	if jl != nil {
 		if jl.Level != LevelUnknown {
 			msg.Level = jl.Level
 		}
@@ -262,13 +275,6 @@ func (p *Parser) processSensitivePattern(msg Message, pattern *Pattern) {
 		}
 		stat.messages++
 	}
-}
-
-func (p *Parser) parseJsonLog(content string) *JsonLog {
-	if !p.parseJson {
-		return nil
-	}
-	return ParseJsonLog(content)
 }
 
 func (p *Parser) getPatternStat(level Level, pattern *Pattern, sample string) (*patternStat, patternKey) {

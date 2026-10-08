@@ -44,6 +44,18 @@ type JsonLog struct {
 }
 
 func ParseJsonLog(content string) *JsonLog {
+	fields := decodeJsonObject(content)
+	if fields == nil {
+		return nil
+	}
+	return jsonLogFromFields(fields)
+}
+
+// decodeJsonObject decodes a log line that holds a single, non-empty JSON
+// object, or returns nil. Surrounding whitespace, such as the \r of a CRLF
+// line ending, is ignored. Numbers are kept as json.Number.
+func decodeJsonObject(content string) map[string]any {
+	content = strings.TrimSpace(content)
 	if len(content) < 2 || content[0] != '{' || content[len(content)-1] != '}' {
 		return nil
 	}
@@ -56,7 +68,12 @@ func ParseJsonLog(content string) *JsonLog {
 	if _, err := d.Token(); err != io.EOF {
 		return nil
 	}
+	return fields
+}
 
+// jsonLogFromFields extracts the message, level and attributes from a decoded
+// JSON log line.
+func jsonLogFromFields(fields map[string]any) *JsonLog {
 	res := &JsonLog{Attributes: map[string]string{}}
 	var msgKey, lvlKey string
 	var msgPrio, lvlPrio int

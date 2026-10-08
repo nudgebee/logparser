@@ -124,7 +124,7 @@ func (m *MultilineCollector) isNextMessage(l string) bool {
 		return false
 	}
 
-	if strings.HasPrefix(l, `{"`) && strings.HasSuffix(l, "}") {
+	if strings.HasPrefix(l, `{"`) && strings.HasSuffix(strings.TrimRight(l, " \t\r"), "}") {
 		return true
 	}
 
