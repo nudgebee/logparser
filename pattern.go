@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -224,16 +225,16 @@ func removeQuotedAndBrackets(s string, buf *bytes.Buffer) string {
 	return buf.String()
 }
 
-// jsonMessageKeys lists the JSON field names (lowercase) used for pattern extraction.
+// patternMessageKeys lists the JSON field names (lowercase) used for pattern extraction.
 // Following industry standard (Datadog, New Relic, Elastic, Better Stack), pattern
 // hashing uses only the message/error content, not metadata fields like timestamps,
 // file paths, line numbers, IDs, or data blobs which produce unstable hashes.
-var jsonMessageKeys = []string{"msg", "message", "error", "err", "reason", "log", "text"}
+var patternMessageKeys = []string{"msg", "message", "error", "err", "reason", "log", "text"}
 
-// jsonLevelKeys lists the JSON field names (lowercase) checked for log level.
+// patternLevelKeys lists the JSON field names (lowercase) checked for log level.
 // Covers: slog/zerolog/zap (level), GCP/Stackdriver (severity), Bunyan (lvl),
 // Python logging (levelname), and common variants.
-var jsonLevelKeys = []string{"level", "severity", "lvl", "log.level", "loglevel", "log_level", "levelname", "log_type"}
+var patternLevelKeys = []string{"level", "severity", "lvl", "log.level", "loglevel", "log_level", "levelname", "log_type"}
 
 // maxFallbackFieldLen caps individual field values in the fallback path to prevent
 // large data blobs (HTML, XML, stack traces) from overwhelming the pattern.
@@ -246,7 +247,15 @@ func parseJSONLog(line string) (message string, level Level, ok bool) {
 	if err := json.Unmarshal([]byte(line), &m); err != nil {
 		return line, LevelUnknown, false
 	}
+	message, level = structuredFromJSON(m)
+	return message, level, true
+}
 
+// structuredFromJSON extracts the pattern content and the level from a
+// decoded JSON log line. Numbers may be float64 (json.Unmarshal) or
+// json.Number (decoding with UseNumber): both render the same, so pattern
+// hashes do not depend on how the line was decoded.
+func structuredFromJSON(m map[string]interface{}) (message string, level Level) {
 	// Build a lowercase-key lookup for case-insensitive matching.
 	lowerMap := make(map[string]interface{}, len(m))
 	for k, v := range m {
@@ -255,7 +264,7 @@ func parseJSONLog(line string) (message string, level Level, ok bool) {
 
 	// Extract level from structured field.
 	level = LevelUnknown
-	for _, k := range jsonLevelKeys {
+	for _, k := range patternLevelKeys {
 		if v, found := lowerMap[k]; found {
 			if s, isStr := v.(string); isStr {
 				level = parseLevelValue(s)
@@ -266,9 +275,9 @@ func parseJSONLog(line string) (message string, level Level, ok bool) {
 
 	// Extract only message-relevant fields for stable pattern hashing.
 	var buf strings.Builder
-	for _, k := range jsonMessageKeys {
+	for _, k := range patternMessageKeys {
 		if v, found := lowerMap[k]; found {
-			s := fmt.Sprintf("%v", v)
+			s := fmt.Sprintf("%v", float64Numbers(v))
 			if s != "" {
 				buf.WriteString(s)
 				buf.WriteByte(' ')
@@ -276,7 +285,7 @@ func parseJSONLog(line string) (message string, level Level, ok bool) {
 		}
 	}
 	if buf.Len() > 0 {
-		return strings.TrimSpace(buf.String()), level, true
+		return strings.TrimSpace(buf.String()), level
 	}
 
 	// Fallback: no known message fields found, use all values sorted by key
@@ -287,14 +296,39 @@ func parseJSONLog(line string) (message string, level Level, ok bool) {
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		s := fmt.Sprintf("%v", m[k])
+		s := fmt.Sprintf("%v", float64Numbers(m[k]))
 		if len(s) > maxFallbackFieldLen {
 			s = s[:maxFallbackFieldLen]
 		}
 		buf.WriteString(s)
 		buf.WriteByte(' ')
 	}
-	return strings.TrimSpace(buf.String()), level, true
+	return strings.TrimSpace(buf.String()), level
+}
+
+// float64Numbers converts json.Number values, including nested ones, to the
+// float64 that json.Unmarshal produces, so both decodings render alike.
+func float64Numbers(v interface{}) interface{} {
+	switch t := v.(type) {
+	case json.Number:
+		if f, err := strconv.ParseFloat(string(t), 64); err == nil {
+			return f
+		}
+		return string(t)
+	case map[string]interface{}:
+		res := make(map[string]interface{}, len(t))
+		for k, vv := range t {
+			res[k] = float64Numbers(vv)
+		}
+		return res
+	case []interface{}:
+		res := make([]interface{}, len(t))
+		for i, vv := range t {
+			res[i] = float64Numbers(vv)
+		}
+		return res
+	}
+	return v
 }
 
 // ParseStructuredLog attempts to parse a log line as a structured format

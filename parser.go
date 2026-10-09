@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/time/rate"
 )
 
 //go:embed sensitive_patterns.json
@@ -17,6 +19,9 @@ var sensitivePatternsJSON []byte
 var (
 	unclassifiedPatternLabel = "unclassified pattern (pattern limit reached)"
 	unclassifiedPatternHash  = "00000000000000000000000000000000"
+
+	sampledPatternLabel = "event was sampled"
+	sampledPatternHash  = "11111111111111111111111111111111"
 )
 
 // Shared pattern caches: compiled once, shared across all parsers.
@@ -82,6 +87,10 @@ type Parser struct {
 
 	multilineCollector *MultilineCollector
 
+	parseJson bool
+
+	limiter *rate.Limiter
+
 	stop func()
 
 	onMsgCb                     OnMsgCallbackF
@@ -92,14 +101,16 @@ type Parser struct {
 	sensitiveCounter  uint64
 }
 
-type OnMsgCallbackF func(ts time.Time, level Level, patternHash string, msg string)
+type OnMsgCallbackF func(ts time.Time, level Level, patternHash string, msg string, attributes map[string]string)
 
-func NewParser(ch <-chan LogEntry, decoder Decoder, onMsgCallback OnMsgCallbackF, multilineCollectorTimeout time.Duration, patternsPerLevelLimit int, sensitiveCfg SensitiveConfig) *Parser {
+func NewParser(ch <-chan LogEntry, decoder Decoder, onMsgCallback OnMsgCallbackF, multilineCollectorTimeout time.Duration, patternsPerLevelLimit int, parseJson bool, limiter *rate.Limiter, sensitiveCfg SensitiveConfig) *Parser {
 	p := &Parser{
 		decoder:               decoder,
 		patterns:              map[patternKey]*patternStat{},
 		patternsPerLevel:      map[Level]int{},
 		patternsPerLevelLimit: patternsPerLevelLimit,
+		parseJson:             parseJson,
+		limiter:               limiter,
 		onMsgCb:               onMsgCallback,
 		sensitivePatterns:     map[sensitivePatternKey]*sensitivePatternStat{},
 		sensitiveConfig:       sensitiveCfg,
@@ -155,30 +166,76 @@ func (p *Parser) inc(msg Message) {
 
 	// Single-pass structured log parsing: extract both normalized message
 	// and authoritative level from JSON/logfmt fields. This replaces the
-	// unreliable GuessLevel text-scan for structured logs.
-	normalizedContent, structuredLevel := ParseStructuredLog(msg.Content)
+	// unreliable GuessLevel text-scan for structured logs. With parseJson, a
+	// JSON line is decoded once, for the pattern content and for the emitted
+	// message and attributes alike.
+	var normalizedContent string
+	var structuredLevel Level
+	var jl *JsonLog
+	if p.parseJson {
+		if fields := decodeJsonObject(msg.Content); fields != nil {
+			normalizedContent, structuredLevel = structuredFromJSON(fields)
+			jl = jsonLogFromFields(fields)
+		}
+	}
+	if jl == nil {
+		normalizedContent, structuredLevel = ParseStructuredLog(msg.Content)
+	}
 	if structuredLevel != LevelUnknown {
 		msg.Level = structuredLevel
 	}
 
-	if msg.Level == LevelUnknown || msg.Level == LevelDebug || msg.Level == LevelInfo {
-		key := patternKey{level: msg.Level, hash: ""}
+	// A JSON log is emitted as its message, with the other fields as
+	// attributes. Patterns still come from normalizedContent.
+	content := msg.Content
+	var attributes map[string]string
+	if jl != nil {
+		if jl.Level != LevelUnknown {
+			msg.Level = jl.Level
+		}
+		if jl.Message != "" {
+			content = jl.Message
+		}
+		attributes = jl.Attributes
+	}
+	level := msg.Level
+
+	if level == LevelUnknown || level == LevelDebug || level == LevelInfo {
+		key := patternKey{level: level, hash: ""}
 		if stat := p.patterns[key]; stat == nil {
 			p.patterns[key] = &patternStat{}
 		}
 		p.patterns[key].messages++
 		if p.onMsgCb != nil {
-			p.onMsgCb(msg.Timestamp, msg.Level, "", msg.Content)
+			p.onMsgCb(msg.Timestamp, level, "", content, attributes)
 		}
 		pattern := NewPatternFromNormalized(normalizedContent)
 		p.processSensitivePattern(msg, pattern)
 		return
 	}
 
+	// Under a log storm, skip pattern extraction and sensitive-data detection
+	// (the CPU-heavy part), counting the message under a dedicated pattern.
+	// Unlike upstream, the message is still emitted: the limit caps CPU, it
+	// must not drop log records.
+	if p.limiter != nil && !p.limiter.Allow() {
+		key := patternKey{level: level, hash: sampledPatternHash}
+		stat := p.patterns[key]
+		if stat == nil {
+			stat = &patternStat{sample: sampledPatternLabel}
+			p.patterns[key] = stat
+		}
+		stat.messages++
+		if p.onMsgCb != nil {
+			p.onMsgCb(msg.Timestamp, level, sampledPatternHash, content, attributes)
+		}
+		return
+	}
+
 	pattern := NewPatternFromNormalized(normalizedContent)
-	stat, key := p.getPatternStat(msg.Level, pattern, msg.Content)
+	stat, key := p.getPatternStat(level, pattern, content)
 	if p.onMsgCb != nil {
-		p.onMsgCb(msg.Timestamp, msg.Level, key.hash, msg.Content)
+		p.onMsgCb(msg.Timestamp, level, key.hash, content, attributes)
 	}
 	stat.messages++
 	p.processSensitivePattern(msg, pattern)

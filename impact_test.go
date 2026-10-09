@@ -54,7 +54,7 @@ func TestResourceImpact(t *testing.T) {
 	parsers := make([]*Parser, 200)
 	for i := range parsers {
 		ch := make(chan LogEntry, 1)
-		parsers[i] = NewParser(ch, nil, nil, time.Second, 256, SensitiveConfig{
+		parsers[i] = NewParser(ch, nil, nil, time.Second, 256, false, nil, SensitiveConfig{
 			Enabled:       true,
 			MinConfidence: "medium",
 			MaxDetections: 100,
@@ -93,7 +93,7 @@ func TestResourceImpact(t *testing.T) {
 	disabledParsers := make([]*Parser, 200)
 	for i := range disabledParsers {
 		ch := make(chan LogEntry, 1)
-		disabledParsers[i] = NewParser(ch, nil, nil, time.Second, 256, SensitiveConfig{
+		disabledParsers[i] = NewParser(ch, nil, nil, time.Second, 256, false, nil, SensitiveConfig{
 			Enabled: false,
 		})
 	}
@@ -144,7 +144,7 @@ func TestResourceImpact(t *testing.T) {
 	for _, cfg := range configs {
 		// Create a parser with this config
 		ch := make(chan LogEntry, 1000)
-		p := NewParser(ch, nil, nil, time.Second, 256, cfg.cfg)
+		p := NewParser(ch, nil, nil, time.Second, 256, false, nil, cfg.cfg)
 
 		// Warm up
 		for _, line := range sampleLines {

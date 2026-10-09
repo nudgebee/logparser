@@ -103,7 +103,7 @@ func GuessLevel(line string) Level {
 				switch sf[:4] {
 				case "debu":
 					return LevelDebug
-				case "info", "noti":
+				case "info", "noti", "note", "syst":
 					return LevelInfo
 				case "warn":
 					return LevelWarning
