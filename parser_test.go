@@ -152,7 +152,7 @@ func TestParserJson(t *testing.T) {
 	var gotLevel Level
 	var gotMsg string
 	var gotAttrs map[string]string
-	cb := func(ts time.Time, level Level, patternHash string, msg string, attributes map[string]string) {
+	cb := func(ts time.Time, level Level, patternHash string, msg string, attributes map[string]string, _ string) {
 		gotLevel, gotMsg, gotAttrs = level, msg, attributes
 	}
 
@@ -222,7 +222,7 @@ func TestParserRateLimit(t *testing.T) {
 		patternsPerLevel:      map[Level]int{},
 		patternsPerLevelLimit: 256,
 		limiter:               rate.NewLimiter(0, 3), // never refills
-		onMsgCb: func(ts time.Time, level Level, patternHash string, msg string, attributes map[string]string) {
+		onMsgCb: func(ts time.Time, level Level, patternHash string, msg string, attributes map[string]string, _ string) {
 			calls++
 			if patternHash == sampledPatternHash {
 				sampled++

@@ -35,6 +35,8 @@ type LogEntry struct {
 	Timestamp time.Time
 	Content   string
 	Level     Level
+	// Stream is "stdout" or "stderr" when the source records it, else "".
+	Stream string
 }
 
 type LogCounter struct {
@@ -101,7 +103,9 @@ type Parser struct {
 	sensitiveCounter  uint64
 }
 
-type OnMsgCallbackF func(ts time.Time, level Level, patternHash string, msg string, attributes map[string]string)
+// OnMsgCallbackF receives every message: its first line's time and stream ("" when
+// the source does not record one), its level, pattern hash, text and fields.
+type OnMsgCallbackF func(ts time.Time, level Level, patternHash string, msg string, attributes map[string]string, stream string)
 
 func NewParser(ch <-chan LogEntry, decoder Decoder, onMsgCallback OnMsgCallbackF, multilineCollectorTimeout time.Duration, patternsPerLevelLimit int, parseJson bool, limiter *rate.Limiter, sensitiveCfg SensitiveConfig) *Parser {
 	p := &Parser{
@@ -127,12 +131,32 @@ func NewParser(ch <-chan LogEntry, decoder Decoder, onMsgCallback OnMsgCallbackF
 	p.multilineCollector = NewMultilineCollector(ctx, multilineCollectorTimeout, multilineCollectorLimit)
 	go func() {
 		var err error
+		partials := partialLines{}
+		flush := time.NewTicker(multilineCollectorTimeout)
+		defer flush.Stop()
 		for {
 			select {
 			case <-ctx.Done():
 				return
+			case now := <-flush.C:
+				for _, entry := range partials.expired(now.Add(-multilineCollectorTimeout)) {
+					p.multilineCollector.Add(entry)
+				}
 			case entry := <-ch:
-				if p.decoder != nil {
+				if ed, ok := p.decoder.(EntryDecoder); ok {
+					line, err := ed.DecodeEntry(entry.Content)
+					if err != nil {
+						continue
+					}
+					entry.Content, entry.Stream = line.Content, line.Stream
+					if !line.Timestamp.IsZero() {
+						entry.Timestamp = line.Timestamp
+					}
+					var whole bool
+					if entry, whole = partials.add(entry, line.Partial, time.Now()); !whole {
+						continue
+					}
+				} else if p.decoder != nil {
 					if entry.Content, err = p.decoder.Decode(entry.Content); err != nil {
 						continue
 					}
@@ -207,7 +231,7 @@ func (p *Parser) inc(msg Message) {
 		}
 		p.patterns[key].messages++
 		if p.onMsgCb != nil {
-			p.onMsgCb(msg.Timestamp, level, "", content, attributes)
+			p.onMsgCb(msg.Timestamp, level, "", content, attributes, msg.Stream)
 		}
 		pattern := NewPatternFromNormalized(normalizedContent)
 		p.processSensitivePattern(msg, pattern)
@@ -227,7 +251,7 @@ func (p *Parser) inc(msg Message) {
 		}
 		stat.messages++
 		if p.onMsgCb != nil {
-			p.onMsgCb(msg.Timestamp, level, sampledPatternHash, content, attributes)
+			p.onMsgCb(msg.Timestamp, level, sampledPatternHash, content, attributes, msg.Stream)
 		}
 		return
 	}
@@ -235,7 +259,7 @@ func (p *Parser) inc(msg Message) {
 	pattern := NewPatternFromNormalized(normalizedContent)
 	stat, key := p.getPatternStat(level, pattern, content)
 	if p.onMsgCb != nil {
-		p.onMsgCb(msg.Timestamp, level, key.hash, content, attributes)
+		p.onMsgCb(msg.Timestamp, level, key.hash, content, attributes, msg.Stream)
 	}
 	stat.messages++
 	p.processSensitivePattern(msg, pattern)

@@ -52,7 +52,7 @@ func TestPatternHashIndependentOfParseJson(t *testing.T) {
 			patternsPerLevel:      map[Level]int{},
 			patternsPerLevelLimit: 256,
 			parseJson:             parseJson,
-			onMsgCb: func(ts time.Time, level Level, patternHash string, msg string, a map[string]string) {
+			onMsgCb: func(ts time.Time, level Level, patternHash string, msg string, a map[string]string, _ string) {
 				h, attrs = patternHash, a
 			},
 		}
