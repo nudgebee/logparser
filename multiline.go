@@ -16,6 +16,7 @@ type Message struct {
 	Timestamp time.Time
 	Content   string
 	Level     Level
+	Stream    string
 }
 
 type MultilineCollector struct {
@@ -24,10 +25,11 @@ type MultilineCollector struct {
 	timeout time.Duration
 	limit   int
 
-	ts    time.Time
-	level Level
-	lines []string
-	size  int
+	ts     time.Time
+	level  Level
+	stream string
+	lines  []string
+	size   int
 
 	lock            sync.Mutex
 	closed          bool
@@ -77,6 +79,10 @@ func (m *MultilineCollector) Add(entry LogEntry) {
 	defer m.lock.Unlock()
 
 	entry.Content = strings.TrimSuffix(entry.Content, "\n")
+	// A message is one stream's: stderr lines never continue a stdout message.
+	if len(m.lines) > 0 && entry.Stream != m.stream {
+		m.flushMessage()
+	}
 	if entry.Content == "" {
 		if len(m.lines) > 0 {
 			m.add(entry)
@@ -98,6 +104,7 @@ func (m *MultilineCollector) add(entry LogEntry) {
 	}
 	if len(m.lines) == 0 {
 		m.ts = entry.Timestamp
+		m.stream = entry.Stream
 		m.level = entry.Level // the level reported by the source is trusted, otherwise it is guessed from the content
 		if m.level == LevelUnknown {
 			m.level = GuessLevel(entry.Content)
@@ -172,6 +179,7 @@ func (m *MultilineCollector) flushMessage() {
 		Timestamp: m.ts,
 		Content:   content,
 		Level:     m.level,
+		Stream:    m.stream,
 	}
 	m.reset()
 	m.Messages <- msg
@@ -180,6 +188,7 @@ func (m *MultilineCollector) flushMessage() {
 func (m *MultilineCollector) reset() {
 	m.ts = time.Time{}
 	m.level = LevelUnknown
+	m.stream = ""
 	m.lines = m.lines[:0]
 	m.size = 0
 	m.isFirstLineContainsTimestamp = false
