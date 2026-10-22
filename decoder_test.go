@@ -117,7 +117,7 @@ func TestParserRuntimeLines(t *testing.T) {
 	var mu sync.Mutex
 	var msgs []got
 	ch := make(chan LogEntry)
-	p := NewParser(ch, CriDecoder{}, func(ts time.Time, _ Level, _ string, msg string, _ map[string]string, stream string) {
+	p := NewParser(ch, CriDecoder{}, func(ts time.Time, _ Level, _ string, msg string, _ map[string]string, stream string, _ int64) {
 		mu.Lock()
 		defer mu.Unlock()
 		msgs = append(msgs, got{ts, stream, msg})
@@ -150,7 +150,7 @@ func TestParserFlushesDanglingPart(t *testing.T) {
 	var mu sync.Mutex
 	var msgs []string
 	ch := make(chan LogEntry)
-	p := NewParser(ch, CriDecoder{}, func(_ time.Time, _ Level, _ string, msg string, _ map[string]string, _ string) {
+	p := NewParser(ch, CriDecoder{}, func(_ time.Time, _ Level, _ string, msg string, _ map[string]string, _ string, _ int64) {
 		mu.Lock()
 		defer mu.Unlock()
 		msgs = append(msgs, msg)

@@ -37,6 +37,11 @@ type LogEntry struct {
 	Level     Level
 	// Stream is "stdout" or "stderr" when the source records it, else "".
 	Stream string
+	// Offset is where the line ends in its source (a file position, for example),
+	// 0 when the source does not track one. The parser hands each message the
+	// Offset of the last line it consumed, so a reader that records it resumes
+	// after the whole message, never inside it.
+	Offset int64
 }
 
 type LogCounter struct {
@@ -104,8 +109,11 @@ type Parser struct {
 }
 
 // OnMsgCallbackF receives every message: its first line's time and stream ("" when
-// the source does not record one), its level, pattern hash, text and fields.
-type OnMsgCallbackF func(ts time.Time, level Level, patternHash string, msg string, attributes map[string]string, stream string)
+// the source does not record one), its level, pattern hash, text and fields, and the
+// Offset of the last line it consumed. Every line read before that one has been
+// passed on by then. offset is 0 when there is nothing new to acknowledge: the
+// source tracks no offsets, or another stream's split line is still being joined.
+type OnMsgCallbackF func(ts time.Time, level Level, patternHash string, msg string, attributes map[string]string, stream string, offset int64)
 
 func NewParser(ch <-chan LogEntry, decoder Decoder, onMsgCallback OnMsgCallbackF, multilineCollectorTimeout time.Duration, patternsPerLevelLimit int, parseJson bool, limiter *rate.Limiter, sensitiveCfg SensitiveConfig) *Parser {
 	p := &Parser{
@@ -132,6 +140,24 @@ func NewParser(ch <-chan LogEntry, decoder Decoder, onMsgCallback OnMsgCallbackF
 	go func() {
 		var err error
 		partials := partialLines{}
+		// held is the furthest offset passed on while a split line was pending.
+		var held int64
+		// acknowledge sets the offset of a line leaving the split-line stage, with
+		// pending split lines still waiting. While one is, nothing past its first
+		// part may be acknowledged: the line carries 0 and its offset is held.
+		// Once none is, every line read so far has been passed on, so the line
+		// acknowledges the furthest of them.
+		acknowledge := func(entry *LogEntry, pending int) {
+			if pending > 0 {
+				held = max(held, entry.Offset)
+				entry.Offset = 0
+				return
+			}
+			if entry.Offset != 0 {
+				entry.Offset = max(entry.Offset, held)
+			}
+			held = 0
+		}
 		flush := time.NewTicker(multilineCollectorTimeout)
 		defer flush.Stop()
 		for {
@@ -139,7 +165,11 @@ func NewParser(ch <-chan LogEntry, decoder Decoder, onMsgCallback OnMsgCallbackF
 			case <-ctx.Done():
 				return
 			case now := <-flush.C:
-				for _, entry := range partials.expired(now.Add(-multilineCollectorTimeout)) {
+				expired := partials.expired(now.Add(-multilineCollectorTimeout))
+				for i, entry := range expired {
+					// Two streams' split lines interleave in the source, so only the
+					// last of them can acknowledge.
+					acknowledge(&entry, len(expired)-1-i+len(partials))
 					p.multilineCollector.Add(entry)
 				}
 			case entry := <-ch:
@@ -156,6 +186,9 @@ func NewParser(ch <-chan LogEntry, decoder Decoder, onMsgCallback OnMsgCallbackF
 					if entry, whole = partials.add(entry, line.Partial, time.Now()); !whole {
 						continue
 					}
+					// Another stream's split line started earlier in the source and
+					// is not passed on yet: acknowledging this line would skip it.
+					acknowledge(&entry, len(partials))
 				} else if p.decoder != nil {
 					if entry.Content, err = p.decoder.Decode(entry.Content); err != nil {
 						continue
@@ -231,7 +264,7 @@ func (p *Parser) inc(msg Message) {
 		}
 		p.patterns[key].messages++
 		if p.onMsgCb != nil {
-			p.onMsgCb(msg.Timestamp, level, "", content, attributes, msg.Stream)
+			p.onMsgCb(msg.Timestamp, level, "", content, attributes, msg.Stream, msg.Offset)
 		}
 		pattern := NewPatternFromNormalized(normalizedContent)
 		p.processSensitivePattern(msg, pattern)
@@ -251,7 +284,7 @@ func (p *Parser) inc(msg Message) {
 		}
 		stat.messages++
 		if p.onMsgCb != nil {
-			p.onMsgCb(msg.Timestamp, level, sampledPatternHash, content, attributes, msg.Stream)
+			p.onMsgCb(msg.Timestamp, level, sampledPatternHash, content, attributes, msg.Stream, msg.Offset)
 		}
 		return
 	}
@@ -259,7 +292,7 @@ func (p *Parser) inc(msg Message) {
 	pattern := NewPatternFromNormalized(normalizedContent)
 	stat, key := p.getPatternStat(level, pattern, content)
 	if p.onMsgCb != nil {
-		p.onMsgCb(msg.Timestamp, level, key.hash, content, attributes, msg.Stream)
+		p.onMsgCb(msg.Timestamp, level, key.hash, content, attributes, msg.Stream, msg.Offset)
 	}
 	stat.messages++
 	p.processSensitivePattern(msg, pattern)

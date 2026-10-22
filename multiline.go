@@ -17,6 +17,9 @@ type Message struct {
 	Content   string
 	Level     Level
 	Stream    string
+	// Offset is the largest non-zero Offset of the lines the message consumed,
+	// including lines dropped over the size limit.
+	Offset int64
 }
 
 type MultilineCollector struct {
@@ -30,6 +33,7 @@ type MultilineCollector struct {
 	stream string
 	lines  []string
 	size   int
+	offset int64
 
 	lock            sync.Mutex
 	closed          bool
@@ -98,6 +102,9 @@ func (m *MultilineCollector) Add(entry LogEntry) {
 }
 
 func (m *MultilineCollector) add(entry LogEntry) {
+	if entry.Offset > m.offset {
+		m.offset = entry.Offset
+	}
 	remaining := m.limit - m.size
 	if remaining <= 0 {
 		return
@@ -180,6 +187,7 @@ func (m *MultilineCollector) flushMessage() {
 		Content:   content,
 		Level:     m.level,
 		Stream:    m.stream,
+		Offset:    m.offset,
 	}
 	m.reset()
 	m.Messages <- msg
@@ -191,6 +199,7 @@ func (m *MultilineCollector) reset() {
 	m.stream = ""
 	m.lines = m.lines[:0]
 	m.size = 0
+	m.offset = 0
 	m.isFirstLineContainsTimestamp = false
 	m.pythonTraceback = false
 	m.pythonTracebackExpected = false

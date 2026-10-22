@@ -9,7 +9,7 @@ import (
 // partialLines joins the parts of a line the container runtime split (CRI "P",
 // Docker json-file lines without a trailing newline), one line per stream, since
 // stdout and stderr parts can interleave. A joined line keeps its first part's
-// time and stops growing at multilineCollectorLimit.
+// time and its last part's Offset, and stops growing at multilineCollectorLimit.
 type partialLines map[string]*pendingLine
 
 type pendingLine struct {
@@ -30,6 +30,7 @@ func (p partialLines) add(e LogEntry, partial bool, now time.Time) (LogEntry, bo
 	if room := multilineCollectorLimit - len(pending.entry.Content); room > 0 {
 		pending.entry.Content += truncateUTF8(e.Content, room)
 	}
+	pending.entry.Offset = e.Offset
 	if partial {
 		pending.at = now
 		return LogEntry{}, false
