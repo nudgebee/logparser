@@ -108,6 +108,38 @@ func TestPendingPartialAcknowledgesLinesPassedOnMeanwhile(t *testing.T) {
 	assert.Equal(t, offsetMsg{"never finished", 25}, got[1])
 }
 
+// A split line that never ends but keeps growing (a progress bar written without a
+// newline, split by the runtime) must not hold acknowledgements back for the whole
+// source: once its first part is old enough it is passed on, and its message
+// acknowledges the other stream's lines held back meanwhile.
+func TestEndlessSplitLineDoesNotBlockAcknowledgements(t *testing.T) {
+	ch, msgs := offsetParser(t, CriDecoder{})
+	send := func(content string, offset int64) {
+		ch <- LogEntry{Timestamp: time.Now(), Content: content, Offset: offset}
+	}
+	send("2026-10-19T10:00:00Z stdout P progress 1% ", 10)
+	send("2026-10-19T10:00:00Z stderr F an error meanwhile", 20)
+	offset := int64(20)
+	deadline := time.Now().Add(2 * time.Second)
+	acked := func() bool {
+		for _, m := range msgs() {
+			if m.offset >= 20 {
+				return true
+			}
+		}
+		return false
+	}
+	// Parts keep arriving well within the multiline timeout (20ms).
+	for !acked() && time.Now().Before(deadline) {
+		offset += 10
+		send("2026-10-19T10:00:00Z stdout P # ", offset)
+		time.Sleep(5 * time.Millisecond)
+	}
+	got := msgs()
+	assert.True(t, acked(), "no message acknowledged the stderr line while stdout kept growing: %v", got)
+	assert.Equal(t, offsetMsg{"an error meanwhile", 0}, got[0], "held while the stdout line is pending")
+}
+
 // A split line whose last part never comes is passed on after the timeout with the
 // offset of the last part read.
 func TestDanglingPartialCarriesItsOffset(t *testing.T) {

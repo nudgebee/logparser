@@ -12,8 +12,13 @@ import (
 // time and its last part's Offset, and stops growing at multilineCollectorLimit.
 type partialLines map[string]*pendingLine
 
+// partialLineMaxAge is how many multiline timeouts a split line may keep growing
+// before it is passed on as it is (see expired).
+const partialLineMaxAge = 10
+
 type pendingLine struct {
 	entry LogEntry
+	first time.Time // when its first part arrived
 	at    time.Time // when its latest part arrived
 }
 
@@ -23,7 +28,7 @@ func (p partialLines) add(e LogEntry, partial bool, now time.Time) (LogEntry, bo
 	pending := p[e.Stream]
 	if pending == nil {
 		if partial {
-			p[e.Stream] = &pendingLine{entry: e, at: now}
+			p[e.Stream] = &pendingLine{entry: e, first: now, at: now}
 		}
 		return e, !partial
 	}
@@ -42,10 +47,15 @@ func (p partialLines) add(e LogEntry, partial bool, now time.Time) (LogEntry, bo
 // expired removes and returns, oldest first, the lines whose latest part arrived
 // before cutoff. Such a line's last part may never come (an unterminated last line,
 // a prompt), and it must not wait forever or glue onto the stream's next line.
-func (p partialLines) expired(cutoff time.Time) []LogEntry {
+//
+// It also removes the lines whose first part arrived before firstCutoff, though
+// parts still arrive: a line that never ends (a progress bar written without a
+// newline) would otherwise stay pending for good, and while any line is pending no
+// offset of its source can be acknowledged. Its later parts start a new line.
+func (p partialLines) expired(cutoff, firstCutoff time.Time) []LogEntry {
 	var lines []*pendingLine
 	for stream, pending := range p {
-		if pending.at.Before(cutoff) {
+		if pending.at.Before(cutoff) || pending.first.Before(firstCutoff) {
 			lines = append(lines, pending)
 			delete(p, stream)
 		}

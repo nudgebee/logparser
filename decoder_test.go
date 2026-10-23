@@ -101,9 +101,16 @@ func TestPartialLines(t *testing.T) {
 	p.add(LogEntry{Content: "Enter password: ", Stream: "stdout"}, true, t0)
 	p.add(LogEntry{Content: "still ", Stream: "stderr"}, true, t0)
 	p.add(LogEntry{Content: "growing ", Stream: "stderr"}, true, t0.Add(time.Second))
-	assert.Equal(t, []LogEntry{{Content: "Enter password: ", Stream: "stdout"}}, p.expired(t0.Add(time.Millisecond)))
+	assert.Equal(t, []LogEntry{{Content: "Enter password: ", Stream: "stdout"}}, p.expired(t0.Add(time.Millisecond), t0))
 	assert.Len(t, p, 1)
-	assert.Empty(t, p.expired(t0.Add(time.Millisecond)))
+	assert.Empty(t, p.expired(t0.Add(time.Millisecond), t0))
+
+	// A line that keeps growing (a progress bar written without a newline) comes
+	// out once its first part is too old, though its latest part is recent.
+	p.add(LogEntry{Content: "more ", Stream: "stderr"}, true, t0.Add(2*time.Second))
+	assert.Empty(t, p.expired(t0.Add(time.Millisecond), t0))
+	assert.Equal(t, []LogEntry{{Content: "still growing more ", Stream: "stderr"}}, p.expired(t0.Add(time.Millisecond), t0.Add(time.Millisecond)))
+	assert.Empty(t, p)
 }
 
 // Lines read from a CRI log file reach the callback with the runtime's time and
