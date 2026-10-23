@@ -40,7 +40,9 @@ type LogEntry struct {
 	// Offset is where the line ends in its source (a file position, for example),
 	// 0 when the source does not track one. The parser hands each message the
 	// Offset of the last line it consumed, so a reader that records it resumes
-	// after the whole message, never inside it.
+	// after the whole message, never inside it. Offsets must only increase within
+	// a source: one that restarts (a truncated or rotated file) needs to keep them
+	// increasing, e.g. by carrying a file generation in the high bits.
 	Offset int64
 }
 
@@ -165,7 +167,7 @@ func NewParser(ch <-chan LogEntry, decoder Decoder, onMsgCallback OnMsgCallbackF
 			case <-ctx.Done():
 				return
 			case now := <-flush.C:
-				expired := partials.expired(now.Add(-multilineCollectorTimeout))
+				expired := partials.expired(now.Add(-multilineCollectorTimeout), now.Add(-partialLineMaxAge*multilineCollectorTimeout))
 				for i, entry := range expired {
 					// Two streams' split lines interleave in the source, so only the
 					// last of them can acknowledge.
