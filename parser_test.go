@@ -1,6 +1,7 @@
 package logparser
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"testing"
@@ -268,4 +269,44 @@ func TestParserRateLimitLevels(t *testing.T) {
 	assert.Equal(t, 1, p.patterns[patternKey{level: LevelDebug, hash: ""}].messages)
 	_, ok := p.patterns[patternKey{level: LevelError, hash: sampledPatternHash}]
 	assert.False(t, ok)
+}
+
+// A JSON line without a level key gets no level from its key names: "error" in
+// {"error":""} is a field, not a severity. A level the source reports is kept.
+func TestParserJsonWithoutLevelKey(t *testing.T) {
+	accessLog := `{"time":"2026-11-03T10:00:00Z","method":"GET","uri":"/healthz","status":200,"error":"","latency_human":"41µs"}`
+	cases := []struct {
+		name    string
+		content string
+		source  Level
+		want    Level
+	}{
+		{"error key, no level key", accessLog, LevelUnknown, LevelUnknown},
+		{"err key with a value, no level key", `{"method":"POST","status":502,"err":"upstream timeout"}`, LevelUnknown, LevelUnknown},
+		{"level guessed from the message", `{"msg":"error: connection refused","attempt":3}`, LevelUnknown, LevelError},
+		{"message without a level word", `{"message":"request served","error":""}`, LevelUnknown, LevelUnknown},
+		{"level key still wins", `{"level":"info","msg":"done","error":""}`, LevelUnknown, LevelInfo},
+		{"source level is kept", accessLog, LevelWarning, LevelWarning},
+		{"plain text is still guessed", `ERROR failed to connect to db`, LevelUnknown, LevelError},
+	}
+	for _, parseJson := range []bool{true, false} {
+		for _, c := range cases {
+			t.Run(fmt.Sprintf("%s/parseJson=%t", c.name, parseJson), func(t *testing.T) {
+				levels := make(chan Level, 1)
+				cb := func(_ time.Time, level Level, _ string, _ string, _ map[string]string, _ string, _ int64) {
+					levels <- level
+				}
+				ch := make(chan LogEntry)
+				p := NewParser(ch, nil, cb, 10*time.Millisecond, 256, parseJson, nil, SensitiveConfig{})
+				defer p.Stop()
+				ch <- LogEntry{Timestamp: time.Now(), Content: c.content, Level: c.source}
+				select {
+				case got := <-levels:
+					assert.Equal(t, c.want, got)
+				case <-time.After(5 * time.Second):
+					t.Fatal("no message emitted")
+				}
+			})
+		}
+	}
 }
