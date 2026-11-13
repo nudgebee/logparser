@@ -20,6 +20,9 @@ type Message struct {
 	// Offset is the largest non-zero Offset of the lines the message consumed,
 	// including lines dropped over the size limit.
 	Offset int64
+	// levelGuessed says Level was guessed from the content, not reported by the
+	// source, so a parser that reads the content as JSON may replace it.
+	levelGuessed bool
 }
 
 type MultilineCollector struct {
@@ -28,12 +31,13 @@ type MultilineCollector struct {
 	timeout time.Duration
 	limit   int
 
-	ts     time.Time
-	level  Level
-	stream string
-	lines  []string
-	size   int
-	offset int64
+	ts           time.Time
+	level        Level
+	levelGuessed bool
+	stream       string
+	lines        []string
+	size         int
+	offset       int64
 
 	lock            sync.Mutex
 	closed          bool
@@ -115,6 +119,7 @@ func (m *MultilineCollector) add(entry LogEntry) {
 		m.level = entry.Level // the level reported by the source is trusted, otherwise it is guessed from the content
 		if m.level == LevelUnknown {
 			m.level = GuessLevel(entry.Content)
+			m.levelGuessed = true
 		}
 		m.isFirstLineContainsTimestamp = containsTimestamp(entry.Content)
 	}
@@ -183,11 +188,12 @@ func (m *MultilineCollector) flushMessage() {
 	}
 	content := strings.TrimSpace(strings.Join(m.lines, "\n"))
 	msg := Message{
-		Timestamp: m.ts,
-		Content:   content,
-		Level:     m.level,
-		Stream:    m.stream,
-		Offset:    m.offset,
+		Timestamp:    m.ts,
+		Content:      content,
+		Level:        m.level,
+		Stream:       m.stream,
+		Offset:       m.offset,
+		levelGuessed: m.levelGuessed,
 	}
 	m.reset()
 	m.Messages <- msg
@@ -196,6 +202,7 @@ func (m *MultilineCollector) flushMessage() {
 func (m *MultilineCollector) reset() {
 	m.ts = time.Time{}
 	m.level = LevelUnknown
+	m.levelGuessed = false
 	m.stream = ""
 	m.lines = m.lines[:0]
 	m.size = 0
