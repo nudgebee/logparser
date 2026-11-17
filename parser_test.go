@@ -284,6 +284,8 @@ func TestParserJsonWithoutLevelKey(t *testing.T) {
 		{"error key, no level key", accessLog, LevelUnknown, LevelUnknown},
 		{"err key with a value, no level key", `{"method":"POST","status":502,"err":"upstream timeout"}`, LevelUnknown, LevelUnknown},
 		{"level guessed from the message", `{"msg":"error: connection refused","attempt":3}`, LevelUnknown, LevelError},
+		// json.dumps spacing: the raw guess reads only the first fields, so it finds no level word.
+		{"level word past the raw guess's reach", `{"time": "2026-11-03T10:00:00Z", "logger": "checkout", "pid": 41, "msg": "error: payment declined"}`, LevelUnknown, LevelError},
 		{"message without a level word", `{"message":"request served","error":""}`, LevelUnknown, LevelUnknown},
 		{"level key still wins", `{"level":"info","msg":"done","error":""}`, LevelUnknown, LevelInfo},
 		{"source level is kept", accessLog, LevelWarning, LevelWarning},
