@@ -271,23 +271,31 @@ func TestParserRateLimitLevels(t *testing.T) {
 	assert.False(t, ok)
 }
 
-// A JSON line without a level key gets no level from its key names: "error" in
-// {"error":""} is a field, not a severity. A level the source reports is kept.
-func TestParserJsonWithoutLevelKey(t *testing.T) {
+// A line gets no level from its key names: "error" in {"error":""} or error=""
+// is a field, not a severity. A level the source reports is kept, and both
+// parseJson modes read the same level keys.
+func TestParserLevelNotFromKeyNames(t *testing.T) {
 	accessLog := `{"time":"2026-11-03T10:00:00Z","method":"GET","uri":"/healthz","status":200,"error":"","latency_human":"41µs"}`
 	cases := []struct {
 		name    string
-		content string
+		content string // one log entry per line
 		source  Level
 		want    Level
 	}{
 		{"error key, no level key", accessLog, LevelUnknown, LevelUnknown},
 		{"err key with a value, no level key", `{"method":"POST","status":502,"err":"upstream timeout"}`, LevelUnknown, LevelUnknown},
-		{"level guessed from the message", `{"msg":"error: connection refused","attempt":3}`, LevelUnknown, LevelError},
-		// json.dumps spacing: the raw guess reads only the first fields, so it finds no level word.
-		{"level word past the raw guess's reach", `{"time": "2026-11-03T10:00:00Z", "logger": "checkout", "pid": 41, "msg": "error: payment declined"}`, LevelUnknown, LevelError},
+		{"level word in the message", `{"msg":"error: connection refused","attempt":3}`, LevelUnknown, LevelError},
+		{"level word in the error value", `{"status":502,"error":"upstream connect error"}`, LevelUnknown, LevelError},
 		{"message without a level word", `{"message":"request served","error":""}`, LevelUnknown, LevelUnknown},
 		{"level key still wins", `{"level":"info","msg":"done","error":""}`, LevelUnknown, LevelInfo},
+		{"numeric level (pino)", `{"level":50,"msg":"payment declined"}`, LevelUnknown, LevelError},
+		{"numeric level written as a float", `{"level":50.0,"msg":"payment declined"}`, LevelUnknown, LevelError},
+		{"@l level (Serilog CLEF)", `{"@t":"2026-11-03T10:00:00Z","@l":"Error","@mt":"Payment {Id} declined"}`, LevelUnknown, LevelError},
+		{"severity_text level (OTel)", `{"severity_text":"ERROR","body":"payment declined"}`, LevelUnknown, LevelError},
+		{"nested level", `{"log":{"level":"error"},"message":"payment declined"}`, LevelUnknown, LevelError},
+		{"level in a non-level key", `{"type":"error","text":"payment declined"}`, LevelUnknown, LevelError},
+		{"logfmt error key", `method=GET uri=/healthz status=200 error=""`, LevelUnknown, LevelUnknown},
+		{"multiline JSON error key", "{\"method\":\"GET\",\"status\":200,\"error\":\"\"}\n  served from cache", LevelUnknown, LevelUnknown},
 		{"source level is kept", accessLog, LevelWarning, LevelWarning},
 		{"plain text is still guessed", `ERROR failed to connect to db`, LevelUnknown, LevelError},
 	}
@@ -301,7 +309,9 @@ func TestParserJsonWithoutLevelKey(t *testing.T) {
 				ch := make(chan LogEntry)
 				p := NewParser(ch, nil, cb, 10*time.Millisecond, 256, parseJson, nil, SensitiveConfig{})
 				defer p.Stop()
-				ch <- LogEntry{Timestamp: time.Now(), Content: c.content, Level: c.source}
+				for _, line := range strings.Split(c.content, "\n") {
+					ch <- LogEntry{Timestamp: time.Now(), Content: line, Level: c.source}
+				}
 				select {
 				case got := <-levels:
 					assert.Equal(t, c.want, got)

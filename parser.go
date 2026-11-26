@@ -240,20 +240,9 @@ func (p *Parser) inc(msg Message) {
 	if jl == nil {
 		normalizedContent, structuredLevel = ParseStructuredLog(msg.Content)
 	}
+	// structuredLevel already holds the level jsonLogFromFields reads.
 	if structuredLevel != LevelUnknown {
 		msg.Level = structuredLevel
-	}
-	// A JSON line keeps its level in a level key. Without one, a level guessed
-	// from the raw line came from its key names ({"error":""} reads as an
-	// error), so it is guessed again from the message alone, or left unknown.
-	if msg.levelGuessed && structuredLevel == LevelUnknown && (jl == nil || jl.Level == LevelUnknown) {
-		if jl != nil {
-			msg.Level = GuessLevel(jl.Message)
-		} else if !p.parseJson {
-			if fields := decodeJsonObject(msg.Content); fields != nil {
-				msg.Level = GuessLevel(jsonLogFromFields(fields).Message)
-			}
-		}
 	}
 
 	// A JSON log is emitted as its message, with the other fields as
@@ -261,9 +250,6 @@ func (p *Parser) inc(msg Message) {
 	content := msg.Content
 	var attributes map[string]string
 	if jl != nil {
-		if jl.Level != LevelUnknown {
-			msg.Level = jl.Level
-		}
 		if jl.Message != "" {
 			content = jl.Message
 		}

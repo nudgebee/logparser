@@ -79,12 +79,27 @@ func GuessLevel(line string) Level {
 	}
 
 	for _, f := range fields[:limit] {
-		subfields := strings.FieldsFunc(f, func(r rune) bool {
-			return r == ']' || r == ')' || r == ';' || r == '|' || r == ':' || r == ',' || r == '.'
-		})
-		for _, sf := range subfields {
+		start := 0
+		for i := 0; i <= len(f); i++ {
+			if i < len(f) && !isLevelFieldSeparator(f[i]) {
+				continue
+			}
+			sf := f[start:i]
+			start = i + 1
+			if sf == "" {
+				continue
+			}
+			// A key names a field, it is not a level: "error" in {"error":""}
+			// or in error="" says nothing about the line's severity.
+			if i < len(f) && f[i] == ':' && isQuotedWord(strings.TrimLeft(sf, "{")) {
+				continue
+			}
 			sf = strings.TrimLeft(strings.ToLower(sf), "\"[(<'")
-			sf = strings.TrimPrefix(sf, "level=")
+			if strings.HasPrefix(sf, "level=") {
+				sf = sf[len("level="):]
+			} else if startsWithKey(sf) {
+				continue
+			}
 
 			if l := len(sf); l == 3 {
 				switch sf {
@@ -126,6 +141,31 @@ func GuessLevel(line string) Level {
 		return l
 	}
 	return LevelUnknown
+}
+
+func isLevelFieldSeparator(c byte) bool {
+	return c == ']' || c == ')' || c == ';' || c == '|' || c == ':' || c == ',' || c == '.'
+}
+
+// isQuotedWord reports whether s is a single quoted word, such as "error".
+func isQuotedWord(s string) bool {
+	return len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' && strings.IndexByte(s[1:len(s)-1], '"') < 0
+}
+
+// startsWithKey reports whether s starts with a key=value pair, such as
+// error="", rather than holding a = further in, as in error[req=abc.
+func startsWithKey(s string) bool {
+	i := strings.IndexByte(s, '=')
+	if i <= 0 {
+		return false
+	}
+	for j := 0; j < i; j++ {
+		c := s[j]
+		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '_' || c == '-') {
+			return false
+		}
+	}
+	return true
 }
 
 func tryGlog(fields []string) Level {
