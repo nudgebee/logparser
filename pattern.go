@@ -256,20 +256,32 @@ func parseJSONLog(line string) (message string, level Level, ok bool) {
 // json.Number (decoding with UseNumber): both render the same, so pattern
 // hashes do not depend on how the line was decoded.
 func structuredFromJSON(m map[string]interface{}) (message string, level Level) {
-	// Build a lowercase-key lookup for case-insensitive matching.
+	// Build a lowercase-key lookup for case-insensitive matching. The level is
+	// read first from the keys jsonLogFromFields reads it from, choosing among
+	// them the same way, so a line gets the same level with or without parseJson.
 	lowerMap := make(map[string]interface{}, len(m))
+	level = LevelUnknown
+	var lvlKey string
+	var lvlPrio int
 	for k, v := range m {
-		lowerMap[strings.ToLower(k)] = v
+		lk := strings.ToLower(k)
+		lowerMap[lk] = v
+		if p, ok := jsonLevelKeys[lk]; ok {
+			if l := jsonLevelFromValue(v); l != LevelUnknown && (lvlKey == "" || p < lvlPrio || (p == lvlPrio && k < lvlKey)) {
+				level, lvlKey, lvlPrio = l, k, p
+			}
+		}
 	}
 
-	// Extract level from structured field.
-	level = LevelUnknown
-	for _, k := range patternLevelKeys {
-		if v, found := lowerMap[k]; found {
-			if s, isStr := v.(string); isStr {
-				level = parseLevelValue(s)
+	// Otherwise, from the other level key names.
+	if level == LevelUnknown {
+		for _, k := range patternLevelKeys {
+			if v, found := lowerMap[k]; found {
+				if s, isStr := v.(string); isStr {
+					level = parseLevelValue(s)
+				}
+				break
 			}
-			break
 		}
 	}
 

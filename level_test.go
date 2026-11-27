@@ -103,3 +103,22 @@ func TestGuessLevel(t *testing.T) {
 	assert.Equal(t, LevelCritical, GuessLevel(`2022/05/14 07:08:37 [crit] 6689#6689: *16721837 SSL_do_handshake() failed (SSL: error:1420918C:SSL routines:tls_early_post_process_client_hello:version too low) while SSL handshaking`))
 	assert.Equal(t, LevelError, GuessLevel(`2009/01/01 19:45:44 [error]  29874#0: *98 open() "/var/www/one/nonexistent.html" failed (2: No such file or directory), client: 11.22.33.44, server: one.org, request: "GET /nonexistent.html HTTP/1.1", host: "one.org"`))
 }
+
+// A key name is not a level; a value, or a word followed by a colon, still is.
+func TestGuessLevelSkipsKeys(t *testing.T) {
+	assert.Equal(t, LevelUnknown, GuessLevel(`{"method":"GET","uri":"/healthz","status":200,"error":""}`))
+	assert.Equal(t, LevelUnknown, GuessLevel(`{"method": "GET", "status": 200, "error": ""}`))
+	assert.Equal(t, LevelUnknown, GuessLevel(`method=GET uri=/healthz status=200 error=""`))
+	assert.Equal(t, LevelUnknown, GuessLevel(`method=GET status=200 warning=none`))
+	assert.Equal(t, LevelUnknown, GuessLevel(`"ERROR": none`))
+
+	assert.Equal(t, LevelError, GuessLevel(`ERROR[req=abc] payment declined`))
+	assert.Equal(t, LevelWarning, GuessLevel(`WARN(user=bob) retrying`))
+	assert.Equal(t, LevelError, GuessLevel(`Failed "connection error": timeout`))
+
+	assert.Equal(t, LevelError, GuessLevel(`{"type":"error","text":"payment declined"}`))
+	assert.Equal(t, LevelError, GuessLevel(`{"msg":"error: connection refused"}`))
+	assert.Equal(t, LevelError, GuessLevel(`{"status":502,"error":"upstream connect error"}`))
+	assert.Equal(t, LevelError, GuessLevel(`ERROR: connection refused`))
+	assert.Equal(t, LevelError, GuessLevel(`ts=2026-11-03T10:00:00Z level=error msg="db down"`))
+}

@@ -240,6 +240,7 @@ func (p *Parser) inc(msg Message) {
 	if jl == nil {
 		normalizedContent, structuredLevel = ParseStructuredLog(msg.Content)
 	}
+	// structuredLevel already holds the level jsonLogFromFields reads.
 	if structuredLevel != LevelUnknown {
 		msg.Level = structuredLevel
 	}
@@ -249,9 +250,6 @@ func (p *Parser) inc(msg Message) {
 	content := msg.Content
 	var attributes map[string]string
 	if jl != nil {
-		if jl.Level != LevelUnknown {
-			msg.Level = jl.Level
-		}
 		if jl.Message != "" {
 			content = jl.Message
 		}

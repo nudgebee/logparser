@@ -3,6 +3,7 @@ package logparser
 import (
 	"encoding/json"
 	"io"
+	"math"
 	"strings"
 	"unicode/utf8"
 )
@@ -136,6 +137,8 @@ func jsonLevelFromValue(v any) Level {
 		return jsonLevelFromString(value)
 	case json.Number:
 		return jsonLevelFromNumber(value)
+	case float64: // decoded without UseNumber
+		return jsonLevelFromFloat(value)
 	}
 	return LevelUnknown
 }
@@ -208,8 +211,17 @@ func jsonLevelFromString(s string) Level {
 }
 
 func jsonLevelFromNumber(n json.Number) Level {
-	v, err := n.Int64()
+	v, err := n.Float64()
 	if err != nil {
+		return LevelUnknown
+	}
+	return jsonLevelFromFloat(v)
+}
+
+// jsonLevelFromFloat maps a numeric level (pino, bunyan) to a Level. Only a
+// whole number is a level, however it is written: 50, 50.0 and 5e1 alike.
+func jsonLevelFromFloat(v float64) Level {
+	if v != math.Trunc(v) {
 		return LevelUnknown
 	}
 	switch {
